@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Mic, Play, Pause, Square, Shuffle, Download, 
-  Headphones, Music, Activity, ChevronUp, ChevronDown, Radio
+  Headphones, Music, Activity, ChevronUp, ChevronDown, Radio, Info
 } from 'lucide-react';
 
 // --- MUSICAL ENGINE (DYNAMIC KEYS) ---
@@ -419,16 +419,38 @@ const playKeys = (frequencies: number[], time: number, duration: number) => {
 };
 
 
-// --- DRAGGABLE UI COMPONENT ---
+// --- UI COMPONENTS ---
+
+const Tooltip = ({ text, show, position = 'top' }: { text: string; show: boolean; position?: 'top' | 'bottom' }) => {
+  if (!show) return null;
+  
+  const posClasses = position === 'top' 
+    ? '-top-12 left-1/2 -translate-x-1/2 mb-2' 
+    : '-bottom-12 left-1/2 -translate-x-1/2 mt-2';
+
+  const arrowClasses = position === 'top'
+    ? 'bottom-[-6px] border-t-indigo-500'
+    : 'top-[-6px] border-b-indigo-500';
+
+  return (
+    <div className={`absolute ${posClasses} z-50 animate-bounce pointer-events-none`}>
+      <div className="bg-indigo-600 text-white text-[10px] font-bold px-3 py-1.5 rounded-full whitespace-nowrap shadow-xl border border-indigo-400/50">
+        {text}
+        <div className={`absolute left-1/2 -translate-x-1/2 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] ${arrowClasses}`}></div>
+      </div>
+    </div>
+  );
+};
 
 interface DraggableCardProps {
   label: string;
   value: string | number;
   subValue?: string;
   onDelta: (delta: number) => void;
+  showHint?: boolean;
 }
 
-const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, onDelta }) => {
+const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, onDelta, showHint }) => {
   const [isDragging, setIsDragging] = useState(false);
   const lastY = useRef(0);
 
@@ -464,6 +486,7 @@ const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, o
       onPointerCancel={handlePointerUp}
       title="Drag up or down to change"
     >
+      <Tooltip text="Swipe Up/Down to Change" show={!!showHint} />
       <ChevronUp className="w-4 h-4 text-slate-500 opacity-30 group-hover:opacity-100 absolute top-2 transition-opacity" />
       <span className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 mt-3 font-medium">{label}</span>
       <span className="text-lg font-semibold text-center leading-tight truncate w-full px-2">{value}</span>
@@ -481,6 +504,14 @@ export default function App() {
   const [transportState, setTransportState] = useState('stopped'); 
   const [recordingState, setRecordingState] = useState('idle'); 
   
+  // Hint State
+  const [showHints, setShowHints] = useState({
+    swipe: true,
+    record: true,
+    play: false,
+    stop: false
+  });
+
   const [tempo, setTempo] = useState(110);
   const [styleIdx, setStyleIdx] = useState(0);
   const [progIdx, setProgIdx] = useState(0);
@@ -524,10 +555,26 @@ export default function App() {
     document.head.appendChild(script);
   }, []);
 
-  const handleTempoChange = (delta: number) => setTempo(t => Math.max(60, Math.min(180, t + delta)));
-  const handleStyleChange = (delta: number) => setStyleIdx(idx => (idx + delta + STYLES.length) % STYLES.length);
-  const handleProgChange = (delta: number) => setProgIdx(idx => (idx + delta + PROGRESSIONS.length) % PROGRESSIONS.length);
-  const handleKeyChange = (delta: number) => setKeyIdx(idx => (idx + delta + ALL_KEYS.length) % ALL_KEYS.length);
+  const dismissHint = (key: keyof typeof showHints) => {
+    setShowHints(prev => ({ ...prev, [key]: false }));
+  };
+
+  const handleTempoChange = (delta: number) => {
+    setTempo(t => Math.max(60, Math.min(180, t + delta)));
+    dismissHint('swipe');
+  };
+  const handleStyleChange = (delta: number) => {
+    setStyleIdx(idx => (idx + delta + STYLES.length) % STYLES.length);
+    dismissHint('swipe');
+  };
+  const handleProgChange = (delta: number) => {
+    setProgIdx(idx => (idx + delta + PROGRESSIONS.length) % PROGRESSIONS.length);
+    dismissHint('swipe');
+  };
+  const handleKeyChange = (delta: number) => {
+    setKeyIdx(idx => (idx + delta + ALL_KEYS.length) % ALL_KEYS.length);
+    dismissHint('swipe');
+  };
 
   const scheduleNote = useCallback((beatNumber: number, time: number) => {
     const style = STYLES[styleIdx];
@@ -585,6 +632,7 @@ export default function App() {
     nextNoteTimeRef.current = audioCtx.currentTime + 0.1;
     scheduler();
     setTransportState('playing');
+    dismissHint('play');
   };
 
   const handleStop = () => {
@@ -600,7 +648,13 @@ export default function App() {
       if (backingRecorderRef.current?.state !== "inactive") backingRecorderRef.current.stop();
       if (mixRecorderRef.current?.state !== "inactive") mixRecorderRef.current.stop();
       setRecordingState('idle');
+      
+      // After first recording stops, show the play hint if they haven't used it
+      if (showHints.record === false) {
+        setShowHints(prev => ({ ...prev, play: true, stop: false }));
+      }
     }
+    dismissHint('stop');
   };
 
   const handlePlayPause = async () => {
@@ -689,6 +743,9 @@ export default function App() {
       setRecordingState('recording');
       if (transportState !== 'playing') await startPlayback();
 
+      // Show stop hint while recording
+      setShowHints(prev => ({ ...prev, record: false, stop: true }));
+
     } catch (err) {
       alert("Failed to initialize recording context. Make sure you are using a modern browser.");
       console.error(err);
@@ -724,6 +781,7 @@ export default function App() {
     const minTempo = newStyle.tempoRange[0];
     const maxTempo = newStyle.tempoRange[1];
     setTempo(Math.floor(Math.random() * (maxTempo - minTempo + 1)) + minTempo);
+    dismissHint('swipe');
   };
 
   useEffect(() => {
@@ -748,7 +806,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30">
       
-      <header className="px-6 py-4 flex justify-center items-center border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-10">
+      <header className="px-6 py-4 flex justify-between items-center border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-10">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-indigo-500 rounded-lg">
             <Music className="w-5 h-5 text-white" />
@@ -757,6 +815,13 @@ export default function App() {
             SongSketch
           </h1>
         </div>
+        <button 
+          onClick={() => setShowHints({ swipe: true, record: true, play: false, stop: false })}
+          className="p-2 text-slate-500 hover:text-slate-300 transition-colors"
+          title="Show Help"
+        >
+          <Info className="w-5 h-5" />
+        </button>
       </header>
 
       <main className="max-w-md mx-auto p-6 space-y-6 pb-24">
@@ -807,11 +872,12 @@ export default function App() {
         </div>
 
         {/* Draggable Parameter Grid */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 relative">
           <DraggableCard 
             label="Style" 
             value={currentStyle.name} 
             onDelta={handleStyleChange} 
+            showHint={showHints.swipe}
           />
           <DraggableCard 
             label="Tempo" 
@@ -842,53 +908,62 @@ export default function App() {
             <Shuffle className="w-5 h-5" />
           </button>
           
-          <button 
-            onClick={handleStop}
-            disabled={transportState === 'stopped' && recordingState === 'idle'}
-            className={`p-4 rounded-full transition-all active:scale-95 shadow-lg ${
-              transportState === 'stopped' && recordingState === 'idle'
-                ? 'bg-slate-800/50 text-slate-600 cursor-not-allowed'
-                : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-            }`}
-            title="Stop & Finish"
-          >
-            <Square className="w-5 h-5 fill-current" />
-          </button>
+          <div className="relative">
+            <Tooltip text="Stop & Save Track" show={showHints.stop} />
+            <button 
+              onClick={handleStop}
+              disabled={transportState === 'stopped' && recordingState === 'idle'}
+              className={`p-4 rounded-full transition-all active:scale-95 shadow-lg ${
+                transportState === 'stopped' && recordingState === 'idle'
+                  ? 'bg-slate-800/50 text-slate-600 cursor-not-allowed'
+                  : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+              }`}
+              title="Stop & Finish"
+            >
+              <Square className="w-5 h-5 fill-current" />
+            </button>
+          </div>
 
-          <button 
-            onClick={handleRecordClick}
-            className={`w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-xl ${
-              recordingState === 'recording' 
-                ? 'bg-rose-500 text-white shadow-[0_0_20px_rgba(244,63,94,0.4)] animate-pulse' 
-                : recordingState === 'paused'
-                ? 'bg-rose-900 text-rose-300 border-2 border-rose-500'
-                : 'bg-slate-800 text-rose-500 border-2 border-slate-700 hover:border-rose-500/50'
-            }`}
-            title="Record / Append"
-          >
-             <Mic className="w-8 h-8" />
-          </button>
+          <div className="relative">
+            <Tooltip text="Click to Record Vocals" show={showHints.record} />
+            <button 
+              onClick={handleRecordClick}
+              className={`w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-xl ${
+                recordingState === 'recording' 
+                  ? 'bg-rose-500 text-white shadow-[0_0_20px_rgba(244,63,94,0.4)] animate-pulse' 
+                  : recordingState === 'paused'
+                  ? 'bg-rose-900 text-rose-300 border-2 border-rose-500'
+                  : 'bg-slate-800 text-rose-500 border-2 border-slate-700 hover:border-rose-500/50'
+              }`}
+              title="Record / Append"
+            >
+               <Mic className="w-8 h-8" />
+            </button>
+          </div>
 
-          <button 
-            onClick={handlePlayPause}
-            className={`p-5 rounded-full transition-all active:scale-95 shadow-lg ${
-              transportState === 'playing'
-                ? 'bg-indigo-500 text-white shadow-[0_0_20px_rgba(99,102,241,0.4)]' 
-                : 'bg-slate-800 text-indigo-400 hover:bg-slate-700'
-            }`}
-            title="Play / Pause"
-          >
-             {transportState === 'playing' ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 ml-1 fill-current" />}
-          </button>
+          <div className="relative">
+            <Tooltip text="Click to Playback" show={showHints.play} />
+            <button 
+              onClick={handlePlayPause}
+              className={`p-5 rounded-full transition-all active:scale-95 shadow-lg ${
+                transportState === 'playing'
+                  ? 'bg-indigo-500 text-white shadow-[0_0_20px_rgba(99,102,241,0.4)]' 
+                  : 'bg-slate-800 text-indigo-400 hover:bg-slate-700'
+              }`}
+              title="Play / Pause"
+            >
+               {transportState === 'playing' ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 ml-1 fill-current" />}
+            </button>
+          </div>
 
         </div>
 
         {/* Export / Recorded Tracks Area */}
         {(vocalUrl || backingUrl || mixUrl) && (
           <div className="mt-8 space-y-4 animate-in fade-in slide-in-from-bottom-4">
-            <h3 className="text-lg font-semibold flex items-center gap-2 border-b border-slate-800 pb-2">
-              <Download className="w-5 h-5 text-indigo-400" /> 
-              Recorded Tracks
+            <h3 className="text-lg font-semibold flex items-center gap-2 border-b border-slate-800 pb-2 text-indigo-300">
+              <Download className="w-5 h-5" /> 
+              Saved Recordings
             </h3>
             
             {/* The Full Mix Track */}
@@ -896,12 +971,12 @@ export default function App() {
               <div className="bg-emerald-900/30 rounded-xl p-4 flex flex-col gap-3 shadow-lg border border-emerald-500/30">
                 <div className="flex justify-between items-center">
                   <span className="font-medium text-emerald-400 flex items-center gap-2">
-                    <Radio className="w-4 h-4" /> Full Mix
+                    <Radio className="w-4 h-4" /> Full Mix (Song)
                   </span>
                   <a 
                     href={mixUrl} 
                     download={`songsketch_mix.wav`}
-                    className="text-xs font-semibold bg-emerald-500/20 text-emerald-300 px-4 py-2 rounded-full hover:bg-emerald-500/40 transition-colors"
+                    className="text-xs font-bold bg-emerald-500 text-white px-4 py-2 rounded-full hover:bg-emerald-400 transition-colors shadow-lg"
                   >
                     Download
                   </a>
@@ -912,7 +987,7 @@ export default function App() {
 
             {/* Vocals */}
             {vocalUrl && (
-              <div className="bg-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-lg">
+              <div className="bg-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-lg border border-slate-700">
                 <div className="flex justify-between items-center">
                   <span className="font-medium text-rose-300 flex items-center gap-2">
                     <Mic className="w-4 h-4" /> Isolated Vocals
@@ -931,7 +1006,7 @@ export default function App() {
 
             {/* Instrumental */}
             {backingUrl && (
-              <div className="bg-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-lg">
+              <div className="bg-slate-800/80 rounded-xl p-4 flex flex-col gap-3 shadow-lg border border-slate-700">
                 <div className="flex justify-between items-center">
                   <span className="font-medium text-indigo-300 flex items-center gap-2">
                     <Activity className="w-4 h-4" /> Instrumental
