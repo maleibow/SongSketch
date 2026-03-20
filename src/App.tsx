@@ -21,6 +21,8 @@ interface StyleDef {
   hat: number[];
   bass: number[];
   keys: number[];
+  pad?: number[];
+  guitar?: number[];
 }
 
 interface ProgressionDef {
@@ -55,6 +57,7 @@ const CHORD_OFFSETS: Record<string, number[]> = {
 };
 
 const PROGRESSIONS: ProgressionDef[] = [
+  // Standard 4-Bar Progressions
   { name: "Pop Anthem", degrees: [1, 5, 6, 4] },
   { name: "Moody", degrees: [6, 4, 1, 5] },
   { name: "Smooth", degrees: [4, 3, 2, 1] },
@@ -66,8 +69,16 @@ const PROGRESSIONS: ProgressionDef[] = [
   { name: "Descent", degrees: [1, 7, 6, 5] },
   { name: "Ascent", degrees: [1, 2, 3, 4] },
   { name: "Vamp", degrees: [1, 4, 1, 4] },
-  { name: "Club Loop", degrees: [2, 4, 6, 5] }
+  { name: "Club Loop", degrees: [2, 4, 6, 5] },
+  // Extended 8-Bar Progressions
+  { name: "Pop 8-Bar Epic", degrees: [1, 5, 6, 4, 1, 5, 4, 4] },
+  { name: "Jazz Journey", degrees: [2, 5, 1, 6, 2, 5, 1, 1] },
+  { name: "Storyteller", degrees: [1, 6, 4, 5, 6, 3, 4, 5] },
+  { name: "Dark Chain", degrees: [6, 4, 1, 5, 6, 4, 3, 3] },
+  { name: "Wandering 8-Bar", degrees: [4, 1, 5, 6, 4, 1, 2, 5] }
 ];
+
+const ZEROS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 const STYLES: StyleDef[] = [
   {
@@ -165,6 +176,29 @@ const STYLES: StyleDef[] = [
     hat:   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
     bass:  [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0],
     keys:  [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0]
+  },
+  // DRUM-LESS STYLES
+  {
+    name: "Piano Only", tempoRange: [60, 90],
+    kick: ZEROS, snare: ZEROS, hat: ZEROS, bass: ZEROS,
+    keys: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+  },
+  {
+    name: "Piano & Violin", tempoRange: [60, 85],
+    kick: ZEROS, snare: ZEROS, hat: ZEROS, bass: ZEROS,
+    keys: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+    pad:  [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  },
+  {
+    name: "Acoustic Guitar", tempoRange: [70, 100],
+    kick: ZEROS, snare: ZEROS, hat: ZEROS, bass: ZEROS, keys: ZEROS,
+    guitar: [1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1]
+  },
+  {
+    name: "Piano & Bass", tempoRange: [80, 110],
+    kick: ZEROS, snare: ZEROS, hat: ZEROS,
+    bass: [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0],
+    keys: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0]
   }
 ];
 
@@ -481,6 +515,55 @@ export default function App() {
     });
   };
 
+  const playPad = (frequencies: number[], time: number, duration: number) => {
+    if (!audioCtx || !masterGain) return;
+    frequencies.forEach(freq => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const filter = audioCtx.createBiquadFilter();
+      
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq;
+      
+      filter.type = 'lowpass';
+      filter.frequency.value = 800;
+      
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+      
+      gain.gain.setValueAtTime(0, time);
+      gain.gain.linearRampToValueAtTime(0.06, time + 0.5); // slow attack
+      gain.gain.setTargetAtTime(0, time + duration, 0.3); // slow release
+      
+      osc.start(time);
+      osc.stop(time + duration + 2.0);
+    });
+  };
+
+  const playGuitar = (frequencies: number[], time: number, duration: number) => {
+    if (!audioCtx || !masterGain) return;
+    frequencies.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      
+      osc.connect(gain);
+      gain.connect(masterGain);
+      
+      const strumDelay = time + (i * 0.02); // 20ms delay per simulated string
+      
+      gain.gain.setValueAtTime(0, strumDelay);
+      gain.gain.linearRampToValueAtTime(0.15, strumDelay + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, strumDelay + duration);
+      
+      osc.start(strumDelay);
+      osc.stop(strumDelay + duration + 0.1);
+    });
+  };
+
   // Tailwind script injection
   useEffect(() => {
     if (document.getElementById('tailwind-cdn')) {
@@ -518,6 +601,11 @@ export default function App() {
     if (style.hat[beatNumber]) playHat(time);
     if (style.bass[beatNumber]) playBass(chordDetails.bassFreq, time, stepDuration * 0.9);
     if (style.keys[beatNumber]) playKeys(chordDetails.freqs, time, stepDuration * 3.5);
+    
+    // Play specialized instruments if the style calls for them
+    if (style.pad && style.pad[beatNumber]) playPad(chordDetails.freqs, time, stepDuration * 16);
+    if (style.guitar && style.guitar[beatNumber]) playGuitar(chordDetails.freqs, time, stepDuration * 4);
+
   }, [styleIdx, progIdx, keyIdx, tempo]);
 
   const nextNote = useCallback(() => {
