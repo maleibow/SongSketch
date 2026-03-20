@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Mic, Play, Pause, Square, Shuffle, Download, 
-  Headphones, Music, Activity, ChevronUp, ChevronDown, Radio, Info
+  Headphones, Music, Activity, ChevronUp, ChevronDown, Radio
 } from 'lucide-react';
 
 // --- MUSICAL ENGINE (DYNAMIC KEYS) ---
@@ -310,37 +310,14 @@ const convertToWav = async (blob: Blob, ctx: AudioContext) => {
 
 // --- UI COMPONENTS ---
 
-const Tooltip = ({ text, show, position = 'top' }: { text: string; show: boolean; position?: 'top' | 'bottom' }) => {
-  if (!show) return null;
-  
-  const posClasses = position === 'top' 
-    ? '-top-14 left-1/2 -translate-x-1/2' 
-    : '-bottom-14 left-1/2 -translate-x-1/2';
-
-  const arrowClasses = position === 'top'
-    ? 'bottom-[-6px] border-t-indigo-600'
-    : 'top-[-6px] border-b-indigo-600';
-
-  return (
-    <div className={`absolute ${posClasses} z-50 pointer-events-none transition-opacity duration-300`}>
-      <div className="bg-indigo-600 text-white text-[11px] font-extrabold px-4 py-2 rounded-2xl whitespace-nowrap shadow-[0_0_20px_rgba(79,70,229,0.5)] border border-indigo-400 animate-pulse flex items-center gap-2">
-        <Info className="w-3 h-3" />
-        {text}
-        <div className={`absolute left-1/2 -translate-x-1/2 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[8px] ${arrowClasses}`}></div>
-      </div>
-    </div>
-  );
-};
-
 interface DraggableCardProps {
   label: string;
   value: string | number;
   subValue?: string;
   onDelta: (delta: number) => void;
-  showHint?: boolean;
 }
 
-const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, onDelta, showHint }) => {
+const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, onDelta }) => {
   const [isDragging, setIsDragging] = useState(false);
   const lastY = useRef(0);
 
@@ -375,7 +352,6 @@ const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, o
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      <Tooltip text="Swipe to change" show={!!showHint} />
       <ChevronUp className="w-4 h-4 text-slate-500 opacity-30 group-hover:opacity-100 absolute top-2 transition-opacity" />
       <span className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 mt-3 font-medium">{label}</span>
       <span className="text-lg font-semibold text-center leading-tight truncate w-full px-2">{value}</span>
@@ -392,14 +368,6 @@ export default function App() {
   const [stylesLoaded, setStylesLoaded] = useState(false);
   const [transportState, setTransportState] = useState('stopped'); 
   const [recordingState, setRecordingState] = useState('idle'); 
-  
-  // Hint State
-  const [showHints, setShowHints] = useState({
-    swipe: true,
-    record: true,
-    play: false,
-    stop: false
-  });
 
   const [tempo, setTempo] = useState(110);
   const [styleIdx, setStyleIdx] = useState(0);
@@ -443,25 +411,17 @@ export default function App() {
     document.head.appendChild(script);
   }, []);
 
-  const dismissHint = (key: keyof typeof showHints) => {
-    setShowHints(prev => ({ ...prev, [key]: false }));
-  };
-
   const handleTempoChange = (delta: number) => {
     setTempo(t => Math.max(60, Math.min(180, t + delta)));
-    dismissHint('swipe');
   };
   const handleStyleChange = (delta: number) => {
     setStyleIdx(idx => (idx + delta + STYLES.length) % STYLES.length);
-    dismissHint('swipe');
   };
   const handleProgChange = (delta: number) => {
     setProgIdx(idx => (idx + delta + PROGRESSIONS.length) % PROGRESSIONS.length);
-    dismissHint('swipe');
   };
   const handleKeyChange = (delta: number) => {
     setKeyIdx(idx => (idx + delta + ALL_KEYS.length) % ALL_KEYS.length);
-    dismissHint('swipe');
   };
 
   const scheduleNote = useCallback((beatNumber: number, time: number) => {
@@ -520,7 +480,6 @@ export default function App() {
     nextNoteTimeRef.current = audioCtx.currentTime + 0.1;
     scheduler();
     setTransportState('playing');
-    dismissHint('play');
   };
 
   const handleStop = () => {
@@ -536,12 +495,7 @@ export default function App() {
       if (backingRecorderRef.current?.state !== "inactive") backingRecorderRef.current.stop();
       if (mixRecorderRef.current?.state !== "inactive") mixRecorderRef.current.stop();
       setRecordingState('idle');
-      
-      if (showHints.record === false) {
-        setShowHints(prev => ({ ...prev, play: true, stop: false }));
-      }
     }
-    dismissHint('stop');
   };
 
   const handlePlayPause = async () => {
@@ -630,8 +584,6 @@ export default function App() {
       setRecordingState('recording');
       if (transportState !== 'playing') await startPlayback();
 
-      setShowHints(prev => ({ ...prev, record: false, stop: true, swipe: false }));
-
     } catch (err) {
       alert("Failed to initialize recording context. Make sure you are using a modern browser.");
       console.error(err);
@@ -666,7 +618,6 @@ export default function App() {
     const minTempo = newStyle.tempoRange[0];
     const maxTempo = newStyle.tempoRange[1];
     setTempo(Math.floor(Math.random() * (maxTempo - minTempo + 1)) + minTempo);
-    dismissHint('swipe');
   };
 
   useEffect(() => {
@@ -699,13 +650,6 @@ export default function App() {
             SongSketch
           </h1>
         </div>
-        <button 
-          onClick={() => setShowHints({ swipe: true, record: true, play: false, stop: false })}
-          className="p-2 text-slate-500 hover:text-indigo-400 transition-colors bg-slate-800/50 rounded-full"
-          title="Reset Hints"
-        >
-          <Info className="w-5 h-5" />
-        </button>
       </header>
 
       <main className="max-w-md mx-auto p-6 space-y-6 pb-24">
@@ -761,7 +705,6 @@ export default function App() {
             label="Song Style" 
             value={currentStyle.name} 
             onDelta={handleStyleChange} 
-            showHint={showHints.swipe}
           />
           <DraggableCard 
             label="Tempo" 
@@ -793,7 +736,6 @@ export default function App() {
           </button>
           
           <div className="relative flex items-center justify-center">
-            <Tooltip text="Stop & Finish" show={showHints.stop} position="top" />
             <button 
               onClick={handleStop}
               disabled={transportState === 'stopped' && recordingState === 'idle'}
@@ -808,7 +750,6 @@ export default function App() {
           </div>
 
           <div className="relative flex items-center justify-center">
-            <Tooltip text="Tap to Record Vocals" show={showHints.record} position="top" />
             <button 
               onClick={handleRecordClick}
               className={`w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-xl ${
@@ -824,7 +765,6 @@ export default function App() {
           </div>
 
           <div className="relative flex items-center justify-center">
-            <Tooltip text="Tap to Playback" show={showHints.play} position="top" />
             <button 
               onClick={handlePlayPause}
               className={`p-5 rounded-full transition-all active:scale-95 shadow-lg ${
