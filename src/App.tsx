@@ -355,7 +355,7 @@ const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, o
 
   return (
     <div 
-      className={`bg-slate-800/50 border border-slate-700/50 rounded-2xl p-4 backdrop-blur flex flex-col items-center justify-center relative touch-none select-none transition-colors group h-24 ${
+      className={`bg-slate-800/50 border border-slate-700/50 rounded-2xl p-4 backdrop-blur flex flex-col items-center justify-center relative touch-none select-none transition-colors group min-h-[6.5rem] h-full ${
         isDragging ? 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.1)] cursor-ns-resize' : 'cursor-ns-resize hover:border-slate-600'
       }`}
       onPointerDown={handlePointerDown}
@@ -364,9 +364,9 @@ const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, o
       onPointerCancel={handlePointerUp}
     >
       <ChevronUp className="w-4 h-4 text-slate-500 opacity-30 group-hover:opacity-100 absolute top-2 transition-opacity" />
-      <span className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 mt-3 font-medium">{label}</span>
-      <span className="text-lg font-semibold text-center leading-tight truncate w-full px-2">{value}</span>
-      {subValue && <span className="text-xs text-indigo-400 mt-1 truncate w-full text-center">{subValue}</span>}
+      <span className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 mt-2 font-medium">{label}</span>
+      <span className="text-base sm:text-lg font-semibold text-center leading-tight w-full px-1">{value}</span>
+      {subValue && <span className="text-[10px] sm:text-xs text-indigo-400 mt-1 w-full text-center">{subValue}</span>}
       <ChevronDown className="w-4 h-4 text-slate-500 opacity-30 group-hover:opacity-100 absolute bottom-2 transition-opacity" />
     </div>
   );
