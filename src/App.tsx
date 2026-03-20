@@ -239,7 +239,11 @@ let mixDest: MediaStreamAudioDestinationNode | null = null;
 let noiseBuffer: AudioBuffer | null = null;
 
 const initAudio = async () => {
-  if (audioCtx) return;
+  if (audioCtx && audioCtx.state !== 'closed') {
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    return;
+  }
+  
   const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
   if (!AudioContextClass) return;
 
@@ -621,7 +625,7 @@ export default function App() {
   }, [tempo]);
 
   const scheduler = useCallback(() => {
-    if (!audioCtx) return;
+    if (!audioCtx || audioCtx.state === 'closed') return;
     while (nextNoteTimeRef.current < audioCtx.currentTime + 0.1) {
       scheduleNote(currentBeatRef.current, nextNoteTimeRef.current);
       nextNote();
@@ -641,7 +645,7 @@ export default function App() {
       barCountRef.current = 0;
     }
     
-    if (audioCtx) {
+    if (audioCtx && audioCtx.state !== 'closed') {
       nextNoteTimeRef.current = audioCtx.currentTime + 0.1;
       scheduler();
       setTransportState('playing');
@@ -811,15 +815,29 @@ export default function App() {
     setTempo(Math.floor(Math.random() * (maxTempo - minTempo + 0)) + minTempo);
   };
 
+  // CLEANUP HOOKS (Crucial for fixing the "only works once" bug)
   useEffect(() => {
     return () => {
       if (timerIDRef.current) clearTimeout(timerIDRef.current);
-      if (audioCtx) audioCtx.close();
-      if (vocalUrl) URL.revokeObjectURL(vocalUrl);
-      if (backingUrl) URL.revokeObjectURL(backingUrl);
-      if (mixUrl) URL.revokeObjectURL(mixUrl);
+      // We explicitly DO NOT close the audioCtx here. It needs to stay alive for the lifetime of the page.
     };
-  }, [vocalUrl, backingUrl, mixUrl]);
+  }, []);
+
+  // Cleanup old URLs independently so it doesn't shut down the audio engine
+  useEffect(() => {
+    const currentUrl = vocalUrl;
+    return () => { if (currentUrl) URL.revokeObjectURL(currentUrl); };
+  }, [vocalUrl]);
+
+  useEffect(() => {
+    const currentUrl = backingUrl;
+    return () => { if (currentUrl) URL.revokeObjectURL(currentUrl); };
+  }, [backingUrl]);
+
+  useEffect(() => {
+    const currentUrl = mixUrl;
+    return () => { if (currentUrl) URL.revokeObjectURL(currentUrl); };
+  }, [mixUrl]);
 
   if (!stylesLoaded) {
     return (
