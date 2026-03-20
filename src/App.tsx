@@ -477,7 +477,6 @@ const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, o
 // --- MAIN APPLICATION COMPONENT ---
 
 export default function App() {
-  const [stylesLoaded, setStylesLoaded] = useState(false); // Track if Tailwind is ready
   const [transportState, setTransportState] = useState('stopped'); 
   const [recordingState, setRecordingState] = useState('idle'); 
   
@@ -510,23 +509,6 @@ export default function App() {
   const currentStyle = STYLES[styleIdx];
   const currentProgression = PROGRESSIONS[progIdx];
   const currentKey = ALL_KEYS[keyIdx];
-
-  // Dynamically inject Tailwind CSS on mount and fade in to prevent FOUC
-  useEffect(() => {
-    if (document.getElementById('tailwind-cdn')) {
-      setStylesLoaded(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.id = 'tailwind-cdn';
-    script.src = 'https://cdn.tailwindcss.com';
-    script.onload = () => setStylesLoaded(true);
-    document.head.appendChild(script);
-
-    // Fallback timer just in case it's blocked but local CSS is working
-    const fallbackTimer = setTimeout(() => setStylesLoaded(true), 500);
-    return () => clearTimeout(fallbackTimer);
-  }, []);
 
   const handleTempoChange = (delta: number) => setTempo(t => Math.max(60, Math.min(180, t + delta)));
   const handleStyleChange = (delta: number) => setStyleIdx(idx => (idx + delta + STYLES.length) % STYLES.length);
@@ -741,10 +723,7 @@ export default function App() {
   }, [vocalUrl, backingUrl, mixUrl]);
 
   return (
-    <div 
-      className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30"
-      style={{ opacity: stylesLoaded ? 1 : 0, transition: 'opacity 0.3s ease-in-out' }}
-    >
+    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30">
       
       <header className="px-6 py-4 flex justify-center items-center border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-10">
         <div className="flex items-center gap-2">
