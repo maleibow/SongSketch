@@ -244,7 +244,8 @@ const initAudio = async () => {
 };
 
 const getSupportedMimeType = () => {
-  const types = ['audio/webm', 'audio/mp4', 'audio/ogg'];
+  // Prioritize mp4 which has much better compatibility with WebKit/Safari on mobile
+  const types = ['audio/mp4', 'audio/webm', 'audio/ogg'];
   for (let t of types) {
     if (typeof (window as any).MediaRecorder !== 'undefined' && (window as any).MediaRecorder.isTypeSupported(t)) {
       return t;
@@ -309,6 +310,7 @@ const audioBufferToWav = (buffer: AudioBuffer) => {
 
 const convertToWav = async (blob: Blob, ctx: AudioContext) => {
   try {
+    if (blob.size === 0) return blob;
     const arrayBuffer = await blob.arrayBuffer();
     const audioBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
       ctx.decodeAudioData(arrayBuffer, resolve, reject);
@@ -404,7 +406,9 @@ export default function App() {
   const vocalChunksRef = useRef<Blob[]>([]);
   const backingChunksRef = useRef<Blob[]>([]);
   const mixChunksRef = useRef<Blob[]>([]);
+  
   const micStreamRef = useRef<MediaStream | null>(null);
+  const micSourceNodeRef = useRef<any>(null);
 
   const currentStyle = STYLES[styleIdx];
   const currentProgression = PROGRESSIONS[progIdx];
@@ -597,6 +601,12 @@ export default function App() {
       setVocalUrl(null); setBackingUrl(null); setMixUrl(null);
 
       try {
+        // Disconnect old mic completely to fix the start/stop/start bug
+        if (micSourceNodeRef.current) {
+          try { micSourceNodeRef.current.disconnect(); } catch (e) {}
+          micSourceNodeRef.current = null;
+        }
+
         micStreamRef.current = await navigator.mediaDevices.getUserMedia({ 
           audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
         });
@@ -604,21 +614,29 @@ export default function App() {
         if (audioCtx && mixLimiterNode) {
           const micSource = audioCtx.createMediaStreamSource(micStreamRef.current);
           micSource.connect(mixLimiterNode);
+          micSourceNodeRef.current = micSource;
         }
 
         vocalChunksRef.current = [];
         const vocalRecorder = new (window as any).MediaRecorder(micStreamRef.current, options);
         vocalRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) vocalChunksRef.current.push(e.data); };
         vocalRecorder.onstop = async () => {
-          const blob = new Blob(vocalChunksRef.current, { type: mimeType || 'audio/webm' });
+          const blob = new Blob(vocalChunksRef.current, { type: mimeType || 'audio/mp4' });
           if (blob.size > 0 && audioCtx) {
             const wavBlob = await convertToWav(blob, audioCtx);
             setVocalUrl(URL.createObjectURL(wavBlob));
           }
+          
+          if (micSourceNodeRef.current) {
+            try { micSourceNodeRef.current.disconnect(); } catch (e) {}
+            micSourceNodeRef.current = null;
+          }
           micStreamRef.current?.getTracks().forEach(track => track.stop());
         };
         vocalRecorderRef.current = vocalRecorder;
-        vocalRecorder.start(200);
+        
+        // Remove timeslice to prevent WebKit blob corruption on long recordings
+        vocalRecorder.start(); 
       } catch (micErr) {
         console.warn("Mic access denied.");
       }
@@ -628,14 +646,14 @@ export default function App() {
         const backingRecorder = new (window as any).MediaRecorder(backingDest.stream, options);
         backingRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) backingChunksRef.current.push(e.data); };
         backingRecorder.onstop = async () => {
-          const blob = new Blob(backingChunksRef.current, { type: mimeType || 'audio/webm' });
+          const blob = new Blob(backingChunksRef.current, { type: mimeType || 'audio/mp4' });
           if (audioCtx) {
             const wavBlob = await convertToWav(blob, audioCtx);
             setBackingUrl(URL.createObjectURL(wavBlob));
           }
         };
         backingRecorderRef.current = backingRecorder;
-        backingRecorder.start(200);
+        backingRecorder.start();
       }
 
       if (mixDest && audioCtx) {
@@ -643,14 +661,14 @@ export default function App() {
         const mixRecorder = new (window as any).MediaRecorder(mixDest.stream, options);
         mixRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) mixChunksRef.current.push(e.data); };
         mixRecorder.onstop = async () => {
-          const blob = new Blob(mixChunksRef.current, { type: mimeType || 'audio/webm' });
+          const blob = new Blob(mixChunksRef.current, { type: mimeType || 'audio/mp4' });
           if (audioCtx) {
             const wavBlob = await convertToWav(blob, audioCtx);
             setMixUrl(URL.createObjectURL(wavBlob));
           }
         };
         mixRecorderRef.current = mixRecorder;
-        mixRecorder.start(200);
+        mixRecorder.start();
       }
 
       setRecordingState('recording');
