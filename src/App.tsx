@@ -27,13 +27,6 @@ interface ProgressionDef {
   degrees: number[];
 }
 
-// Extend Window for legacy AudioContext
-declare global {
-  interface Window {
-    webkitAudioContext: typeof AudioContext;
-  }
-}
-
 // --- MUSICAL ENGINE DATA ---
 
 const ROOT_NOTES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -210,8 +203,11 @@ let mixLimiterNode: DynamicsCompressorNode | null = null;
 
 const initAudio = async () => {
   if (audioCtx) return;
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  audioCtx = new AudioContextClass();
+  // Use any cast to bypass potentially missing window definitions in strict CI
+  const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  audioCtx = new AudioContextClass() as AudioContext;
   
   masterGain = audioCtx.createGain();
   masterGain.gain.value = 0.7;
@@ -250,7 +246,7 @@ const initAudio = async () => {
 const getSupportedMimeType = () => {
   const types = ['audio/webm', 'audio/mp4', 'audio/ogg'];
   for (let t of types) {
-    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) {
+    if (typeof (window as any).MediaRecorder !== 'undefined' && (window as any).MediaRecorder.isTypeSupported(t)) {
       return t;
     }
   }
@@ -400,9 +396,9 @@ export default function App() {
   const timerIDRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const barCountRef = useRef(0);
   
-  const vocalRecorderRef = useRef<MediaRecorder | null>(null);
-  const backingRecorderRef = useRef<MediaRecorder | null>(null);
-  const mixRecorderRef = useRef<MediaRecorder | null>(null);
+  const vocalRecorderRef = useRef<any>(null);
+  const backingRecorderRef = useRef<any>(null);
+  const mixRecorderRef = useRef<any>(null);
   
   const vocalChunksRef = useRef<Blob[]>([]);
   const backingChunksRef = useRef<Blob[]>([]);
@@ -610,8 +606,8 @@ export default function App() {
         }
 
         vocalChunksRef.current = [];
-        const vocalRecorder = new MediaRecorder(micStreamRef.current, options);
-        vocalRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) vocalChunksRef.current.push(e.data); };
+        const vocalRecorder = new (window as any).MediaRecorder(micStreamRef.current, options);
+        vocalRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) vocalChunksRef.current.push(e.data); };
         vocalRecorder.onstop = async () => {
           const blob = new Blob(vocalChunksRef.current, { type: mimeType || 'audio/webm' });
           if (blob.size > 0 && audioCtx) {
@@ -628,12 +624,14 @@ export default function App() {
 
       if (backingDest && audioCtx) {
         backingChunksRef.current = [];
-        const backingRecorder = new MediaRecorder(backingDest.stream, options);
-        backingRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) backingChunksRef.current.push(e.data); };
+        const backingRecorder = new (window as any).MediaRecorder(backingDest.stream, options);
+        backingRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) backingChunksRef.current.push(e.data); };
         backingRecorder.onstop = async () => {
           const blob = new Blob(backingChunksRef.current, { type: mimeType || 'audio/webm' });
-          const wavBlob = await convertToWav(blob, audioCtx!);
-          setBackingUrl(URL.createObjectURL(wavBlob));
+          if (audioCtx) {
+            const wavBlob = await convertToWav(blob, audioCtx);
+            setBackingUrl(URL.createObjectURL(wavBlob));
+          }
         };
         backingRecorderRef.current = backingRecorder;
         backingRecorder.start(200);
@@ -641,12 +639,14 @@ export default function App() {
 
       if (mixDest && audioCtx) {
         mixChunksRef.current = [];
-        const mixRecorder = new MediaRecorder(mixDest.stream, options);
-        mixRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) mixChunksRef.current.push(e.data); };
+        const mixRecorder = new (window as any).MediaRecorder(mixDest.stream, options);
+        mixRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) mixChunksRef.current.push(e.data); };
         mixRecorder.onstop = async () => {
           const blob = new Blob(mixChunksRef.current, { type: mimeType || 'audio/webm' });
-          const wavBlob = await convertToWav(blob, audioCtx!);
-          setMixUrl(URL.createObjectURL(wavBlob));
+          if (audioCtx) {
+            const wavBlob = await convertToWav(blob, audioCtx);
+            setMixUrl(URL.createObjectURL(wavBlob));
+          }
         };
         mixRecorderRef.current = mixRecorder;
         mixRecorder.start(200);
