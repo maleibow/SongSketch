@@ -255,11 +255,17 @@ const initAudio = async () => {
   masterGain.connect(masterLimiter);
   masterLimiter.connect(audioCtx.destination); 
   
+  backingDest = audioCtx.createMediaStreamDestination();
+  masterLimiter.connect(backingDest);
+
+  mixDest = audioCtx.createMediaStreamDestination();
+  
   mixLimiterNode = audioCtx.createDynamicsCompressor();
   mixLimiterNode.threshold.value = -1.0;
   mixLimiterNode.ratio.value = 20.0;
   
   masterLimiter.connect(mixLimiterNode);
+  mixLimiterNode.connect(mixDest);
 
   const bufferSize = audioCtx.sampleRate * 2; 
   noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
@@ -701,22 +707,6 @@ export default function App() {
       }
       if (micStreamRef.current) {
         micStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-
-      // Re-create the destination nodes to ensure fresh MediaStreams on Safari
-      if (audioCtx && masterLimiter && mixLimiterNode) {
-        if (backingDest) {
-          try { masterLimiter.disconnect(backingDest); } catch(e) {}
-        }
-        if (mixDest) {
-          try { mixLimiterNode.disconnect(mixDest); } catch(e) {}
-        }
-
-        backingDest = audioCtx.createMediaStreamDestination();
-        masterLimiter.connect(backingDest);
-
-        mixDest = audioCtx.createMediaStreamDestination();
-        mixLimiterNode.connect(mixDest);
       }
 
       try {
