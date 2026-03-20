@@ -477,6 +477,7 @@ const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, o
 // --- MAIN APPLICATION COMPONENT ---
 
 export default function App() {
+  const [stylesLoaded, setStylesLoaded] = useState(false);
   const [transportState, setTransportState] = useState('stopped'); 
   const [recordingState, setRecordingState] = useState('idle'); 
   
@@ -509,6 +510,19 @@ export default function App() {
   const currentStyle = STYLES[styleIdx];
   const currentProgression = PROGRESSIONS[progIdx];
   const currentKey = ALL_KEYS[keyIdx];
+
+  // Guarantee Tailwind CSS loads before rendering the UI
+  useEffect(() => {
+    if (document.getElementById('tailwind-cdn')) {
+      setStylesLoaded(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = 'tailwind-cdn';
+    script.src = 'https://cdn.tailwindcss.com';
+    script.onload = () => setStylesLoaded(true);
+    document.head.appendChild(script);
+  }, []);
 
   const handleTempoChange = (delta: number) => setTempo(t => Math.max(60, Math.min(180, t + delta)));
   const handleStyleChange = (delta: number) => setStyleIdx(idx => (idx + delta + STYLES.length) % STYLES.length);
@@ -721,6 +735,15 @@ export default function App() {
       if (mixUrl) URL.revokeObjectURL(mixUrl);
     };
   }, [vocalUrl, backingUrl, mixUrl]);
+
+  // Loading screen prevents FOUC (Flash of Unstyled Content) while Tailwind script loads
+  if (!stylesLoaded) {
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: '#0f172a', display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center', color: '#818cf8', fontFamily: 'sans-serif' }}>
+        <p>Loading SongSketch Interface...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30">
