@@ -513,11 +513,20 @@ export default function App() {
     frequencies.forEach(freq => {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      osc.type = 'sine'; osc.frequency.value = freq;
-      osc.connect(gain); gain.connect(masterGain);
-      gain.gain.setValueAtTime(0, time); gain.gain.linearRampToValueAtTime(0.12, time + 0.05);
-      gain.gain.setTargetAtTime(0, time + duration - 0.1, 0.1);
-      osc.start(time); osc.stop(time + duration);
+      osc.type = 'sine'; 
+      osc.frequency.value = freq;
+      osc.connect(gain); 
+      gain.connect(masterGain);
+      
+      // Smooth Attack & Release to prevent popping/clicking
+      gain.gain.setValueAtTime(0, time); 
+      gain.gain.linearRampToValueAtTime(0.15, time + 0.03); // Smooth 30ms attack
+      gain.gain.setValueAtTime(0.15, time + duration); // Sustain
+      gain.gain.linearRampToValueAtTime(0, time + duration + 0.3); // Fluid 300ms release tail
+      
+      osc.start(time); 
+      // Stop oscillator slightly after release tail finishes to ensure silence
+      osc.stop(time + duration + 0.35); 
     });
   };
 
