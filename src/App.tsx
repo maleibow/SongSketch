@@ -4,15 +4,39 @@ import {
   Headphones, Music, Activity, ChevronUp, ChevronDown, Radio
 } from 'lucide-react';
 
-// --- MUSICAL ENGINE (DYNAMIC KEYS) ---
-
-const ROOT_NOTES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+// --- TYPES & INTERFACES ---
 
 interface KeyDef {
   root: string;
   type: 'Major' | 'Minor';
   rootIdx: number;
 }
+
+interface StyleDef {
+  name: string;
+  tempoRange: [number, number];
+  kick: number[];
+  snare: number[];
+  hat: number[];
+  bass: number[];
+  keys: number[];
+}
+
+interface ProgressionDef {
+  name: string;
+  degrees: number[];
+}
+
+// Extend Window for legacy AudioContext
+declare global {
+  interface Window {
+    webkitAudioContext: typeof AudioContext;
+  }
+}
+
+// --- MUSICAL ENGINE DATA ---
+
+const ROOT_NOTES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 
 const ALL_KEYS: KeyDef[] = [];
 ROOT_NOTES.forEach((root, i) => {
@@ -36,7 +60,7 @@ const CHORD_OFFSETS: Record<string, number[]> = {
   'dim': [0, 3, 6],
 };
 
-const PROGRESSIONS = [
+const PROGRESSIONS: ProgressionDef[] = [
   { name: "Pop Anthem", degrees: [1, 5, 6, 4] },
   { name: "Moody", degrees: [6, 4, 1, 5] },
   { name: "Smooth", degrees: [4, 3, 2, 1] },
@@ -51,7 +75,7 @@ const PROGRESSIONS = [
   { name: "Club Loop", degrees: [2, 4, 6, 5] }
 ];
 
-const STYLES = [
+const STYLES: StyleDef[] = [
   {
     name: "Pop", tempoRange: [100, 130],
     kick:  [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
@@ -150,7 +174,8 @@ const STYLES = [
   }
 ];
 
-// Theory helper functions
+// --- THEORY HELPER FUNCTIONS ---
+
 const midiToFreq = (midi: number) => 440 * Math.pow(2, (midi - 69) / 12);
 
 const getChordDetails = (keyIdx: number, degree: number) => {
@@ -174,31 +199,26 @@ const getChordDetails = (keyIdx: number, degree: number) => {
   return { name: chordName, bassFreq: midiToFreq(bassMidi), freqs };
 };
 
-// --- AUDIO ENGINE CORE ---
+// --- AUDIO ENGINE SINGLETON ---
 
-let audioCtx: AudioContext | any = null;
-let masterGain: GainNode | any = null;
-let backingDest: MediaStreamAudioDestinationNode | any = null;
-let mixDest: MediaStreamAudioDestinationNode | any = null;
-let micSourceNode: MediaStreamAudioSourceNode | any = null;
-let noiseBuffer: AudioBuffer | any = null;
-let mixLimiterNode: DynamicsCompressorNode | any = null;
+let audioCtx: AudioContext | null = null;
+let masterGain: GainNode | null = null;
+let backingDest: MediaStreamAudioDestinationNode | null = null;
+let mixDest: MediaStreamAudioDestinationNode | null = null;
+let noiseBuffer: AudioBuffer | null = null;
+let mixLimiterNode: DynamicsCompressorNode | null = null;
 
 const initAudio = async () => {
   if (audioCtx) return;
-  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   audioCtx = new AudioContextClass();
   
   masterGain = audioCtx.createGain();
-  masterGain.gain.value = 0.7; // Reduce overall gain for headroom
+  masterGain.gain.value = 0.7;
   
-  // Master Limiter to prevent instrumental clipping
   const masterLimiter = audioCtx.createDynamicsCompressor();
   masterLimiter.threshold.value = -3.0;
-  masterLimiter.knee.value = 0.0;
   masterLimiter.ratio.value = 20.0;
-  masterLimiter.attack.value = 0.002;
-  masterLimiter.release.value = 0.1;
   
   masterGain.connect(masterLimiter);
   masterLimiter.connect(audioCtx.destination); 
@@ -208,13 +228,9 @@ const initAudio = async () => {
 
   mixDest = audioCtx.createMediaStreamDestination();
   
-  // Mix Limiter to prevent clipping when summing mic and instrumental
   mixLimiterNode = audioCtx.createDynamicsCompressor();
   mixLimiterNode.threshold.value = -1.0;
-  mixLimiterNode.knee.value = 0.0;
   mixLimiterNode.ratio.value = 20.0;
-  mixLimiterNode.attack.value = 0.002;
-  mixLimiterNode.release.value = 0.1;
   
   masterLimiter.connect(mixLimiterNode);
   mixLimiterNode.connect(mixDest);
@@ -241,12 +257,12 @@ const getSupportedMimeType = () => {
   return '';
 };
 
-// --- AUDIO CONVERSION TO WAV ---
+// --- WAV CONVERSION UTILS ---
 
 const audioBufferToWav = (buffer: AudioBuffer) => {
   const numChannels = buffer.numberOfChannels;
   const sampleRate = buffer.sampleRate;
-  const format = 1; // PCM
+  const format = 1; 
   const bitDepth = 16;
   
   const result = new Float32Array(buffer.length * numChannels);
@@ -308,7 +324,7 @@ const convertToWav = async (blob: Blob, ctx: AudioContext) => {
   }
 };
 
-// --- UI COMPONENTS ---
+// --- DRAGGABLE UI COMPONENT ---
 
 interface DraggableCardProps {
   label: string;
@@ -330,7 +346,6 @@ const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, o
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging) return;
     const deltaY = lastY.current - e.clientY; 
-    
     if (Math.abs(deltaY) > 15) {
       onDelta(Math.sign(deltaY));
       lastY.current = e.clientY;
@@ -361,7 +376,6 @@ const DraggableCard: React.FC<DraggableCardProps> = ({ label, value, subValue, o
   );
 };
 
-
 // --- MAIN APPLICATION COMPONENT ---
 
 export default function App() {
@@ -383,12 +397,12 @@ export default function App() {
   
   const currentBeatRef = useRef(0);
   const nextNoteTimeRef = useRef(0);
-  const timerIDRef = useRef<any>(null);
+  const timerIDRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const barCountRef = useRef(0);
   
-  const vocalRecorderRef = useRef<any>(null);
-  const backingRecorderRef = useRef<any>(null);
-  const mixRecorderRef = useRef<any>(null);
+  const vocalRecorderRef = useRef<MediaRecorder | null>(null);
+  const backingRecorderRef = useRef<MediaRecorder | null>(null);
+  const mixRecorderRef = useRef<MediaRecorder | null>(null);
   
   const vocalChunksRef = useRef<Blob[]>([]);
   const backingChunksRef = useRef<Blob[]>([]);
@@ -399,6 +413,74 @@ export default function App() {
   const currentProgression = PROGRESSIONS[progIdx];
   const currentKey = ALL_KEYS[keyIdx];
 
+  // INSTRUMENT VOICING
+  const playKick = (time: number) => {
+    if (!audioCtx || !masterGain) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(masterGain);
+    osc.frequency.setValueAtTime(150, time);
+    osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.5);
+    gain.gain.setValueAtTime(0.8, time);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
+    osc.start(time); osc.stop(time + 0.5);
+  };
+
+  const playSnare = (time: number) => {
+    if (!audioCtx || !masterGain || !noiseBuffer) return;
+    const noiseSource = audioCtx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    const noiseFilter = audioCtx.createBiquadFilter();
+    noiseFilter.type = 'highpass';
+    noiseFilter.frequency.value = 1000;
+    const noiseGain = audioCtx.createGain();
+    noiseSource.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(masterGain);
+    noiseGain.gain.setValueAtTime(1, time);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+    noiseSource.start(time); noiseSource.stop(time + 0.2);
+  };
+
+  const playHat = (time: number) => {
+    if (!audioCtx || !masterGain || !noiseBuffer) return;
+    const noiseSource = audioCtx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    const noiseFilter = audioCtx.createBiquadFilter();
+    noiseFilter.type = 'highpass';
+    noiseFilter.frequency.value = 7000;
+    const noiseGain = audioCtx.createGain();
+    noiseSource.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(masterGain);
+    noiseGain.gain.setValueAtTime(0.3, time);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+    noiseSource.start(time); noiseSource.stop(time + 0.05);
+  };
+
+  const playBass = (freq: number, time: number, duration: number) => {
+    if (!audioCtx || !masterGain) return;
+    const osc = audioCtx.createOscillator();
+    const filter = audioCtx.createBiquadFilter();
+    const gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.value = freq;
+    filter.type = 'lowpass'; filter.frequency.setValueAtTime(800, time);
+    osc.connect(filter); filter.connect(gain); gain.connect(masterGain);
+    gain.gain.setValueAtTime(0.5, time); gain.gain.setTargetAtTime(0, time + duration - 0.05, 0.015);
+    osc.start(time); osc.stop(time + duration);
+  };
+
+  const playKeys = (frequencies: number[], time: number, duration: number) => {
+    if (!audioCtx || !masterGain) return;
+    frequencies.forEach(freq => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine'; osc.frequency.value = freq;
+      osc.connect(gain); gain.connect(masterGain);
+      gain.gain.setValueAtTime(0, time); gain.gain.linearRampToValueAtTime(0.12, time + 0.05);
+      gain.gain.setTargetAtTime(0, time + duration - 0.1, 0.1);
+      osc.start(time); osc.stop(time + duration);
+    });
+  };
+
+  // Tailwind script injection
   useEffect(() => {
     if (document.getElementById('tailwind-cdn')) {
       setStylesLoaded(true);
@@ -411,24 +493,15 @@ export default function App() {
     document.head.appendChild(script);
   }, []);
 
-  const handleTempoChange = (delta: number) => {
-    setTempo(t => Math.max(60, Math.min(180, t + delta)));
-  };
-  const handleStyleChange = (delta: number) => {
-    setStyleIdx(idx => (idx + delta + STYLES.length) % STYLES.length);
-  };
-  const handleProgChange = (delta: number) => {
-    setProgIdx(idx => (idx + delta + PROGRESSIONS.length) % PROGRESSIONS.length);
-  };
-  const handleKeyChange = (delta: number) => {
-    setKeyIdx(idx => (idx + delta + ALL_KEYS.length) % ALL_KEYS.length);
-  };
+  const handleTempoChange = (delta: number) => setTempo(t => Math.max(60, Math.min(180, t + delta)));
+  const handleStyleChange = (delta: number) => setStyleIdx(idx => (idx + delta + STYLES.length) % STYLES.length);
+  const handleProgChange = (delta: number) => setProgIdx(idx => (idx + delta + PROGRESSIONS.length) % PROGRESSIONS.length);
+  const handleKeyChange = (delta: number) => setKeyIdx(idx => (idx + delta + ALL_KEYS.length) % ALL_KEYS.length);
 
   const scheduleNote = useCallback((beatNumber: number, time: number) => {
     const style = STYLES[styleIdx];
     const progression = PROGRESSIONS[progIdx];
     const stepDuration = (60.0 / tempo) * 0.25;
-
     const degree = progression.degrees[barCountRef.current % progression.degrees.length];
     const chordDetails = getChordDetails(keyIdx, degree);
 
@@ -450,7 +523,6 @@ export default function App() {
     const secondsPerBeat = 60.0 / tempo;
     nextNoteTimeRef.current += 0.25 * secondsPerBeat;
     currentBeatRef.current++;
-    
     if (currentBeatRef.current === 16) {
       currentBeatRef.current = 0;
       barCountRef.current++;
@@ -458,6 +530,7 @@ export default function App() {
   }, [tempo]);
 
   const scheduler = useCallback(() => {
+    if (!audioCtx) return;
     while (nextNoteTimeRef.current < audioCtx.currentTime + 0.1) {
       scheduleNote(currentBeatRef.current, nextNoteTimeRef.current);
       nextNote();
@@ -467,7 +540,7 @@ export default function App() {
 
   const startPlayback = async () => {
     if (!audioCtx) await initAudio();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
     
     if (transportState === 'stopped') {
       const degree = PROGRESSIONS[progIdx].degrees[0];
@@ -477,13 +550,15 @@ export default function App() {
       barCountRef.current = 0;
     }
     
-    nextNoteTimeRef.current = audioCtx.currentTime + 0.1;
-    scheduler();
-    setTransportState('playing');
+    if (audioCtx) {
+      nextNoteTimeRef.current = audioCtx.currentTime + 0.1;
+      scheduler();
+      setTransportState('playing');
+    }
   };
 
   const handleStop = () => {
-    clearTimeout(timerIDRef.current);
+    if (timerIDRef.current) clearTimeout(timerIDRef.current);
     setTransportState('stopped');
     setCurrentBeat(0);
     barCountRef.current = 0;
@@ -491,22 +566,22 @@ export default function App() {
     setActiveChordName('...');
 
     if (recordingState !== 'idle') {
-      if (vocalRecorderRef.current?.state !== "inactive") vocalRecorderRef.current.stop();
-      if (backingRecorderRef.current?.state !== "inactive") backingRecorderRef.current.stop();
-      if (mixRecorderRef.current?.state !== "inactive") mixRecorderRef.current.stop();
+      if (vocalRecorderRef.current?.state !== "inactive") vocalRecorderRef.current?.stop();
+      if (backingRecorderRef.current?.state !== "inactive") backingRecorderRef.current?.stop();
+      if (mixRecorderRef.current?.state !== "inactive") mixRecorderRef.current?.stop();
       setRecordingState('idle');
     }
   };
 
   const handlePlayPause = async () => {
     if (transportState === 'playing') {
-      clearTimeout(timerIDRef.current);
+      if (timerIDRef.current) clearTimeout(timerIDRef.current);
       setTransportState('paused');
       
       if (recordingState === 'recording') {
-        if (vocalRecorderRef.current?.state === 'recording') vocalRecorderRef.current.pause();
-        if (backingRecorderRef.current?.state === 'recording') backingRecorderRef.current.pause();
-        if (mixRecorderRef.current?.state === 'recording') mixRecorderRef.current.pause();
+        vocalRecorderRef.current?.pause();
+        backingRecorderRef.current?.pause();
+        mixRecorderRef.current?.pause();
         setRecordingState('paused');
       }
     } else {
@@ -517,7 +592,7 @@ export default function App() {
   const startNewRecordingSession = async () => {
     try {
       if (!audioCtx) await initAudio();
-      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
 
       const mimeType = getSupportedMimeType();
       const options = mimeType ? { mimeType } : undefined;
@@ -526,66 +601,60 @@ export default function App() {
 
       try {
         micStreamRef.current = await navigator.mediaDevices.getUserMedia({ 
-          audio: { 
-            echoCancellation: false, 
-            noiseSuppression: false,
-            autoGainControl: false
-          } 
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
         });
         
-        micSourceNode = audioCtx.createMediaStreamSource(micStreamRef.current);
-        micSourceNode.connect(mixLimiterNode);
+        if (audioCtx && mixLimiterNode) {
+          const micSource = audioCtx.createMediaStreamSource(micStreamRef.current);
+          micSource.connect(mixLimiterNode);
+        }
 
         vocalChunksRef.current = [];
         const vocalRecorder = new MediaRecorder(micStreamRef.current, options);
-        vocalRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) vocalChunksRef.current.push(e.data); };
+        vocalRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) vocalChunksRef.current.push(e.data); };
         vocalRecorder.onstop = async () => {
           const blob = new Blob(vocalChunksRef.current, { type: mimeType || 'audio/webm' });
-          if (blob.size > 0) {
+          if (blob.size > 0 && audioCtx) {
             const wavBlob = await convertToWav(blob, audioCtx);
             setVocalUrl(URL.createObjectURL(wavBlob));
           }
-          if (micStreamRef.current) micStreamRef.current.getTracks().forEach(track => track.stop());
-          if (micSourceNode) micSourceNode.disconnect();
+          micStreamRef.current?.getTracks().forEach(track => track.stop());
         };
         vocalRecorderRef.current = vocalRecorder;
         vocalRecorder.start(200);
-
       } catch (micErr) {
-        console.warn("Mic access denied or unavailable. Recording instrumental only.");
+        console.warn("Mic access denied.");
       }
 
-      backingChunksRef.current = [];
-      const backingRecorder = new MediaRecorder(backingDest.stream, options);
-      backingRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) backingChunksRef.current.push(e.data); };
-      backingRecorder.onstop = async () => {
-         const blob = new Blob(backingChunksRef.current, { type: mimeType || 'audio/webm' });
-         if (blob.size > 0) {
-           const wavBlob = await convertToWav(blob, audioCtx);
-           setBackingUrl(URL.createObjectURL(wavBlob));
-         }
-      };
-      backingRecorderRef.current = backingRecorder;
-      backingRecorder.start(200);
+      if (backingDest && audioCtx) {
+        backingChunksRef.current = [];
+        const backingRecorder = new MediaRecorder(backingDest.stream, options);
+        backingRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) backingChunksRef.current.push(e.data); };
+        backingRecorder.onstop = async () => {
+          const blob = new Blob(backingChunksRef.current, { type: mimeType || 'audio/webm' });
+          const wavBlob = await convertToWav(blob, audioCtx!);
+          setBackingUrl(URL.createObjectURL(wavBlob));
+        };
+        backingRecorderRef.current = backingRecorder;
+        backingRecorder.start(200);
+      }
 
-      mixChunksRef.current = [];
-      const mixRecorder = new MediaRecorder(mixDest.stream, options);
-      mixRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) mixChunksRef.current.push(e.data); };
-      mixRecorder.onstop = async () => {
-         const blob = new Blob(mixChunksRef.current, { type: mimeType || 'audio/webm' });
-         if (blob.size > 0) {
-           const wavBlob = await convertToWav(blob, audioCtx);
-           setMixUrl(URL.createObjectURL(wavBlob));
-         }
-      };
-      mixRecorderRef.current = mixRecorder;
-      mixRecorder.start(200);
+      if (mixDest && audioCtx) {
+        mixChunksRef.current = [];
+        const mixRecorder = new MediaRecorder(mixDest.stream, options);
+        mixRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) mixChunksRef.current.push(e.data); };
+        mixRecorder.onstop = async () => {
+          const blob = new Blob(mixChunksRef.current, { type: mimeType || 'audio/webm' });
+          const wavBlob = await convertToWav(blob, audioCtx!);
+          setMixUrl(URL.createObjectURL(wavBlob));
+        };
+        mixRecorderRef.current = mixRecorder;
+        mixRecorder.start(200);
+      }
 
       setRecordingState('recording');
       if (transportState !== 'playing') await startPlayback();
-
     } catch (err) {
-      alert("Failed to initialize recording context. Make sure you are using a modern browser.");
       console.error(err);
     }
   };
@@ -594,14 +663,14 @@ export default function App() {
     if (recordingState === 'idle') {
       await startNewRecordingSession();
     } else if (recordingState === 'recording') {
-      if (vocalRecorderRef.current?.state === 'recording') vocalRecorderRef.current.pause();
-      if (backingRecorderRef.current?.state === 'recording') backingRecorderRef.current.pause();
-      if (mixRecorderRef.current?.state === 'recording') mixRecorderRef.current.pause();
+      vocalRecorderRef.current?.pause();
+      backingRecorderRef.current?.pause();
+      mixRecorderRef.current?.pause();
       setRecordingState('paused');
     } else if (recordingState === 'paused') {
-      if (vocalRecorderRef.current?.state === 'paused') vocalRecorderRef.current.resume();
-      if (backingRecorderRef.current?.state === 'paused') backingRecorderRef.current.resume();
-      if (mixRecorderRef.current?.state === 'paused') mixRecorderRef.current.resume();
+      vocalRecorderRef.current?.resume();
+      backingRecorderRef.current?.resume();
+      mixRecorderRef.current?.resume();
       setRecordingState('recording');
       if (transportState !== 'playing') await startPlayback();
     }
@@ -610,11 +679,9 @@ export default function App() {
   const randomizeIdea = () => {
     const newStyleIdx = Math.floor(Math.random() * STYLES.length);
     const newStyle = STYLES[newStyleIdx];
-    
     setStyleIdx(newStyleIdx);
     setProgIdx(Math.floor(Math.random() * PROGRESSIONS.length));
     setKeyIdx(Math.floor(Math.random() * ALL_KEYS.length));
-    
     const minTempo = newStyle.tempoRange[0];
     const maxTempo = newStyle.tempoRange[1];
     setTempo(Math.floor(Math.random() * (maxTempo - minTempo + 1)) + minTempo);
@@ -622,7 +689,7 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      clearTimeout(timerIDRef.current);
+      if (timerIDRef.current) clearTimeout(timerIDRef.current);
       if (audioCtx) audioCtx.close();
       if (vocalUrl) URL.revokeObjectURL(vocalUrl);
       if (backingUrl) URL.revokeObjectURL(backingUrl);
@@ -632,7 +699,7 @@ export default function App() {
 
   if (!stylesLoaded) {
     return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#0f172a', display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center', color: '#818cf8', fontFamily: 'sans-serif' }}>
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-indigo-400 font-sans">
         <p>Loading SongSketch Interface...</p>
       </div>
     );
@@ -640,7 +707,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30">
-      
       <header className="px-6 py-4 flex justify-between items-center border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-10">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-indigo-600 rounded-lg shadow-[0_0_15px_rgba(79,70,229,0.3)]">
@@ -653,13 +719,11 @@ export default function App() {
       </header>
 
       <main className="max-w-md mx-auto p-6 space-y-6 pb-24">
-        
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-3 flex items-start gap-3 text-sm text-blue-300">
           <Headphones className="w-5 h-5 flex-shrink-0 mt-0.5" />
           <p>For the best quality, use headphones while recording vocals.</p>
         </div>
 
-        {/* Visualizer */}
         <div className="relative flex flex-col items-center justify-center py-6">
           <div className={`w-48 h-48 rounded-full border-4 flex flex-col items-center justify-center transition-all duration-300 relative overflow-hidden ${
             recordingState === 'recording' ? 'border-rose-500 shadow-[0_0_40px_rgba(244,63,94,0.3)] scale-105' : 
@@ -667,11 +731,9 @@ export default function App() {
             transportState === 'playing' ? 'border-indigo-500 shadow-[0_0_40px_rgba(99,102,241,0.3)] scale-105' : 
             'border-slate-700'
           }`}>
-            
             {transportState === 'playing' && (
               <div className="absolute inset-0 bg-indigo-500/5 animate-pulse rounded-full pointer-events-none" />
             )}
-
             <span className="text-[10px] uppercase tracking-widest text-slate-400 mb-1 font-bold opacity-60">
               {recordingState === 'recording' ? 'RECORDING' : 
                recordingState === 'paused' ? 'REC PAUSED' : 
@@ -683,108 +745,58 @@ export default function App() {
                 {activeChordName}
               </span>
             </div>
-            
             <div className="flex gap-2 mt-4">
               {[0, 1, 2, 3].map(beat => (
-                <div 
-                  key={beat} 
-                  className={`w-3 h-3 rounded-full transition-all duration-150 ${
-                    transportState === 'playing' && currentBeat === beat 
-                      ? (recordingState === 'recording' ? 'bg-rose-500 scale-125' : 'bg-indigo-500 scale-125') 
-                      : 'bg-slate-700 scale-100'
-                  }`}
-                />
+                <div key={beat} className={`w-3 h-3 rounded-full transition-all duration-150 ${
+                  transportState === 'playing' && currentBeat === beat 
+                    ? (recordingState === 'recording' ? 'bg-rose-500 scale-125' : 'bg-indigo-500 scale-125') 
+                    : 'bg-slate-700 scale-100'
+                }`} />
               ))}
             </div>
           </div>
         </div>
 
-        {/* Draggable Parameter Grid */}
         <div className="grid grid-cols-2 gap-3 relative">
-          <DraggableCard 
-            label="Song Style" 
-            value={currentStyle.name} 
-            onDelta={handleStyleChange} 
-          />
-          <DraggableCard 
-            label="Tempo" 
-            value={`${tempo} BPM`} 
-            onDelta={handleTempoChange} 
-          />
-          <DraggableCard 
-            label="Musical Key" 
-            value={`${currentKey.root} ${currentKey.type}`} 
-            onDelta={handleKeyChange} 
-          />
-          <DraggableCard 
-            label="Progression" 
-            value={currentProgression.name} 
-            subValue={currentProgression.degrees.join(' - ')}
-            onDelta={handleProgChange} 
-          />
+          <DraggableCard label="Song Style" value={currentStyle.name} onDelta={handleStyleChange} />
+          <DraggableCard label="Tempo" value={`${tempo} BPM`} onDelta={handleTempoChange} />
+          <DraggableCard label="Musical Key" value={`${currentKey.root} ${currentKey.type}`} onDelta={handleKeyChange} />
+          <DraggableCard label="Progression" value={currentProgression.name} subValue={currentProgression.degrees.join(' - ')} onDelta={handleProgChange} />
         </div>
 
-        {/* Main Controls */}
         <div className="flex justify-center items-center gap-5 py-6">
-          
-          <button 
-            onClick={randomizeIdea}
-            className="p-4 rounded-full bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-all active:scale-95 shadow-lg border border-slate-700/50"
-            title="Randomize All"
-          >
+          <button onClick={randomizeIdea} className="p-4 rounded-full bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-all active:scale-95 shadow-lg border border-slate-700/50" title="Randomize All">
             <Shuffle className="w-5 h-5" />
           </button>
           
-          <div className="relative flex items-center justify-center">
-            <button 
-              onClick={handleStop}
-              disabled={transportState === 'stopped' && recordingState === 'idle'}
-              className={`p-4 rounded-full transition-all active:scale-95 shadow-lg ${
-                transportState === 'stopped' && recordingState === 'idle'
-                  ? 'bg-slate-800/30 text-slate-700 cursor-not-allowed border border-transparent'
-                  : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700/50'
-              }`}
-            >
-              <Square className="w-5 h-5 fill-current" />
-            </button>
-          </div>
+          <button onClick={handleStop} disabled={transportState === 'stopped' && recordingState === 'idle'} className={`p-4 rounded-full transition-all active:scale-95 shadow-lg ${
+            transportState === 'stopped' && recordingState === 'idle'
+              ? 'bg-slate-800/30 text-slate-700 cursor-not-allowed border border-transparent'
+              : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700/50'
+          }`}>
+            <Square className="w-5 h-5 fill-current" />
+          </button>
 
-          <div className="relative flex items-center justify-center">
-            <button 
-              onClick={handleRecordClick}
-              className={`w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-xl ${
-                recordingState === 'recording' 
-                  ? 'bg-rose-500 text-white shadow-[0_0_30px_rgba(244,63,94,0.4)]' 
-                  : recordingState === 'paused'
-                  ? 'bg-rose-900 text-rose-300 border-2 border-rose-500'
-                  : 'bg-slate-800 text-rose-500 border-2 border-slate-700 hover:border-rose-500/50'
-              }`}
-            >
-               <Mic className={`w-9 h-9 ${recordingState === 'recording' ? 'animate-pulse' : ''}`} />
-            </button>
-          </div>
+          <button onClick={handleRecordClick} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-xl ${
+            recordingState === 'recording' ? 'bg-rose-500 text-white shadow-[0_0_30px_rgba(244,63,94,0.4)]' : 
+            recordingState === 'paused' ? 'bg-rose-900 text-rose-300 border-2 border-rose-500' :
+            'bg-slate-800 text-rose-500 border-2 border-slate-700 hover:border-rose-500/50'
+          }`}>
+             <Mic className={`w-9 h-9 ${recordingState === 'recording' ? 'animate-pulse' : ''}`} />
+          </button>
 
-          <div className="relative flex items-center justify-center">
-            <button 
-              onClick={handlePlayPause}
-              className={`p-5 rounded-full transition-all active:scale-95 shadow-lg ${
-                transportState === 'playing'
-                  ? 'bg-indigo-600 text-white shadow-[0_0_25px_rgba(79,70,229,0.4)]' 
-                  : 'bg-slate-800 text-indigo-400 hover:bg-slate-700 border border-slate-700/50'
-              }`}
-            >
-               {transportState === 'playing' ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 ml-1 fill-current" />}
-            </button>
-          </div>
-
+          <button onClick={handlePlayPause} className={`p-5 rounded-full transition-all active:scale-95 shadow-lg ${
+            transportState === 'playing' ? 'bg-indigo-600 text-white shadow-[0_0_25px_rgba(79,70,229,0.4)]' : 
+            'bg-slate-800 text-indigo-400 hover:bg-slate-700 border border-slate-700/50'
+          }`}>
+             {transportState === 'playing' ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 ml-1 fill-current" />}
+          </button>
         </div>
 
-        {/* Export / Recorded Tracks Area */}
         {(vocalUrl || backingUrl || mixUrl) && (
           <div className="mt-8 space-y-4 animate-in fade-in slide-in-from-bottom-6 duration-500">
             <h3 className="text-sm font-bold flex items-center gap-2 border-b border-slate-800 pb-3 text-indigo-300 uppercase tracking-widest">
-              <Download className="w-4 h-4" /> 
-              Your Saved Ideas
+              <Download className="w-4 h-4" /> Your Saved Ideas
             </h3>
             
             {mixUrl && (
@@ -793,11 +805,7 @@ export default function App() {
                   <span className="font-bold text-emerald-400 flex items-center gap-2 text-sm uppercase tracking-wide">
                     <Radio className="w-4 h-4" /> The Song (Full Mix)
                   </span>
-                  <a 
-                    href={mixUrl} 
-                    download={`songsketch_mix.wav`}
-                    className="text-[10px] font-black bg-emerald-500 text-white px-4 py-2 rounded-full hover:bg-emerald-400 transition-colors shadow-lg uppercase tracking-tighter"
-                  >
+                  <a href={mixUrl} download="songsketch_mix.wav" className="text-[10px] font-black bg-emerald-500 text-white px-4 py-2 rounded-full hover:bg-emerald-400 transition-colors shadow-lg uppercase tracking-tighter">
                     Download WAV
                   </a>
                 </div>
@@ -812,31 +820,18 @@ export default function App() {
                     <span className="font-bold text-rose-300 flex items-center gap-2 text-xs uppercase tracking-wide">
                       <Mic className="w-4 h-4" /> Vocals Only
                     </span>
-                    <a 
-                      href={vocalUrl} 
-                      download={`songsketch_vocals.wav`}
-                      className="text-[10px] font-bold bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-600 transition-colors uppercase"
-                    >
-                      Save
-                    </a>
+                    <a href={vocalUrl} download="songsketch_vocals.wav" className="text-[10px] font-bold bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-600 transition-colors uppercase">Save</a>
                   </div>
                   <audio key={vocalUrl} src={vocalUrl} controls className="w-full h-10 rounded-lg outline-none" />
                 </div>
               )}
-
               {backingUrl && (
                 <div className="bg-slate-800/60 rounded-2xl p-4 flex flex-col gap-3 border border-slate-700/50">
                   <div className="flex justify-between items-center">
                     <span className="font-bold text-indigo-300 flex items-center gap-2 text-xs uppercase tracking-wide">
                       <Activity className="w-4 h-4" /> Instrumental
                     </span>
-                    <a 
-                      href={backingUrl} 
-                      download={`songsketch_instrumental.wav`}
-                      className="text-[10px] font-bold bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-600 transition-colors uppercase"
-                    >
-                      Save
-                    </a>
+                    <a href={backingUrl} download="songsketch_backing.wav" className="text-[10px] font-bold bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-600 transition-colors uppercase">Save</a>
                   </div>
                   <audio key={backingUrl} src={backingUrl} controls className="w-full h-10 rounded-lg outline-none" />
                 </div>
@@ -844,7 +839,6 @@ export default function App() {
             </div>
           </div>
         )}
-
       </main>
     </div>
   );
