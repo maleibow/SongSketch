@@ -231,10 +231,12 @@ const getChordDetails = (keyIdx: number, degree: number) => {
 
 let audioCtx: AudioContext | null = null;
 let masterGain: GainNode | null = null;
+let masterLimiter: DynamicsCompressorNode | null = null;
+let mixLimiterNode: DynamicsCompressorNode | null = null;
+
 let backingDest: MediaStreamAudioDestinationNode | null = null;
 let mixDest: MediaStreamAudioDestinationNode | null = null;
 let noiseBuffer: AudioBuffer | null = null;
-let mixLimiterNode: DynamicsCompressorNode | null = null;
 
 const initAudio = async () => {
   if (audioCtx) return;
@@ -246,24 +248,18 @@ const initAudio = async () => {
   masterGain = audioCtx.createGain();
   masterGain.gain.value = 0.7;
   
-  const masterLimiter = audioCtx.createDynamicsCompressor();
+  masterLimiter = audioCtx.createDynamicsCompressor();
   masterLimiter.threshold.value = -3.0;
   masterLimiter.ratio.value = 20.0;
   
   masterGain.connect(masterLimiter);
   masterLimiter.connect(audioCtx.destination); 
   
-  backingDest = audioCtx.createMediaStreamDestination();
-  masterLimiter.connect(backingDest);
-
-  mixDest = audioCtx.createMediaStreamDestination();
-  
   mixLimiterNode = audioCtx.createDynamicsCompressor();
   mixLimiterNode.threshold.value = -1.0;
   mixLimiterNode.ratio.value = 20.0;
   
   masterLimiter.connect(mixLimiterNode);
-  mixLimiterNode.connect(mixDest);
 
   const bufferSize = audioCtx.sampleRate * 2; 
   noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
@@ -655,6 +651,16 @@ export default function App() {
     setActiveChordName('...');
 
     if (recordingState !== 'idle') {
+      // 1. Immediately disconnect mic to free up hardware
+      if (micSourceNodeRef.current) {
+        try { micSourceNodeRef.current.disconnect(); } catch (e) {}
+        micSourceNodeRef.current = null;
+      }
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      // 2. Stop recorders
       if (vocalRecorderRef.current?.state !== "inactive") vocalRecorderRef.current?.stop();
       if (backingRecorderRef.current?.state !== "inactive") backingRecorderRef.current?.stop();
       if (mixRecorderRef.current?.state !== "inactive") mixRecorderRef.current?.stop();
@@ -688,13 +694,32 @@ export default function App() {
 
       setVocalUrl(null); setBackingUrl(null); setMixUrl(null);
 
-      try {
-        // Disconnect old mic completely to fix the start/stop/start bug
-        if (micSourceNodeRef.current) {
-          try { micSourceNodeRef.current.disconnect(); } catch (e) {}
-          micSourceNodeRef.current = null;
+      // Clean up any stray old mic instances just in case
+      if (micSourceNodeRef.current) {
+        try { micSourceNodeRef.current.disconnect(); } catch (e) {}
+        micSourceNodeRef.current = null;
+      }
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+
+      // Re-create the destination nodes to ensure fresh MediaStreams on Safari
+      if (audioCtx && masterLimiter && mixLimiterNode) {
+        if (backingDest) {
+          try { masterLimiter.disconnect(backingDest); } catch(e) {}
+        }
+        if (mixDest) {
+          try { mixLimiterNode.disconnect(mixDest); } catch(e) {}
         }
 
+        backingDest = audioCtx.createMediaStreamDestination();
+        masterLimiter.connect(backingDest);
+
+        mixDest = audioCtx.createMediaStreamDestination();
+        mixLimiterNode.connect(mixDest);
+      }
+
+      try {
         micStreamRef.current = await navigator.mediaDevices.getUserMedia({ 
           audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
         });
@@ -709,21 +734,23 @@ export default function App() {
         const vocalRecorder = new (window as any).MediaRecorder(micStreamRef.current, options);
         vocalRecorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) vocalChunksRef.current.push(e.data); };
         vocalRecorder.onstop = async () => {
+          // Immediately kill mic tracks on stop to release camera/mic light quickly
+          if (micSourceNodeRef.current) {
+            try { micSourceNodeRef.current.disconnect(); } catch (e) {}
+            micSourceNodeRef.current = null;
+          }
+          if (micStreamRef.current) {
+            micStreamRef.current.getTracks().forEach(track => track.stop());
+          }
+
           const blob = new Blob(vocalChunksRef.current, { type: mimeType || 'audio/mp4' });
           if (blob.size > 0 && audioCtx) {
             const wavBlob = await convertToWav(blob, audioCtx);
             setVocalUrl(URL.createObjectURL(wavBlob));
           }
-          
-          if (micSourceNodeRef.current) {
-            try { micSourceNodeRef.current.disconnect(); } catch (e) {}
-            micSourceNodeRef.current = null;
-          }
-          micStreamRef.current?.getTracks().forEach(track => track.stop());
         };
         vocalRecorderRef.current = vocalRecorder;
         
-        // Remove timeslice to prevent WebKit blob corruption on long recordings
         vocalRecorder.start(); 
       } catch (micErr) {
         console.warn("Mic access denied.");
