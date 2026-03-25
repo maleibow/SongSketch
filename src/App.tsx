@@ -6,34 +6,58 @@ import {
   Settings, Sliders, Bell, Layers, Speaker, Drum
 } from 'lucide-react';
 
+// --- TYPES & INTERFACES ---
+
+interface KeyDef {
+  root: string;
+  type: 'Major' | 'Minor';
+  rootIdx: number;
+}
+
+interface StyleDef {
+  name: string;
+  tempoRange: [number, number];
+  kick: number[];
+  snare: number[];
+  hat: number[];
+  bass: number[];
+  keys: number[];
+  pad?: number[];
+  guitar?: number[];
+}
+
+interface ProgressionDef {
+  name: string;
+  degrees: number[];
+}
+
 // --- MUSICAL ENGINE DATA ---
 
 const ROOT_NOTES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 
-const ALL_KEYS = [];
+const ALL_KEYS: KeyDef[] = [];
 ROOT_NOTES.forEach((root, i) => {
   ALL_KEYS.push({ root, type: 'Major', rootIdx: i });
   ALL_KEYS.push({ root, type: 'Minor', rootIdx: i });
 });
 
-const SCALES = {
+const SCALES: Record<'Major' | 'Minor', number[]> = {
   'Major': [0, 2, 4, 5, 7, 9, 11],
   'Minor': [0, 2, 3, 5, 7, 8, 10]
 };
 
-const CHORD_QUALITIES = {
+const CHORD_QUALITIES: Record<'Major' | 'Minor', string[]> = {
   'Major': ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'],
   'Minor': ['min', 'dim', 'maj', 'min', 'min', 'maj', 'maj']
 };
 
-const CHORD_OFFSETS = {
+const CHORD_OFFSETS: Record<string, number[]> = {
   'maj': [0, 4, 7],
   'min': [0, 3, 7],
   'dim': [0, 3, 6],
 };
 
-const PROGRESSIONS = [
-  // Standard 4-Bar Progressions
+const PROGRESSIONS: ProgressionDef[] = [
   { name: "Pop Anthem", degrees: [1, 5, 6, 4] },
   { name: "Moody", degrees: [6, 4, 1, 5] },
   { name: "Smooth", degrees: [4, 3, 2, 1] },
@@ -46,7 +70,6 @@ const PROGRESSIONS = [
   { name: "Ascent", degrees: [1, 2, 3, 4] },
   { name: "Vamp", degrees: [1, 4, 1, 4] },
   { name: "Club Loop", degrees: [2, 4, 6, 5] },
-  // Extended 8-Bar Progressions
   { name: "Pop 8-Bar Epic", degrees: [1, 5, 6, 4, 1, 5, 4, 4] },
   { name: "Jazz Journey", degrees: [2, 5, 1, 6, 2, 5, 1, 1] },
   { name: "Storyteller", degrees: [1, 6, 4, 5, 6, 3, 4, 5] },
@@ -56,7 +79,7 @@ const PROGRESSIONS = [
 
 const ZEROS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-const STYLES = [
+const STYLES: StyleDef[] = [
   {
     name: "Pop", tempoRange: [100, 130],
     kick:  [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
@@ -196,7 +219,6 @@ const getChordDetails = (keyIdx, degree) => {
   
   const chordName = rootName + suffix;
 
-  // FIX: Drop bass down 1 octave to C1 (Midi 24 instead of 36) for true bass pitch
   const bassMidi = 24 + chordRootIdx; 
   const keysMidi = 60 + chordRootIdx; 
   const freqs = CHORD_OFFSETS[quality].map(offset => midiToFreq(keysMidi + offset));
@@ -389,6 +411,7 @@ export default function App() {
   const [stylesLoaded, setStylesLoaded] = useState(false);
   const [transportState, setTransportState] = useState('stopped'); 
   const [recordingState, setRecordingState] = useState('idle'); 
+  const [showInstructions, setShowInstructions] = useState(true);
   const [activeTab, setActiveTab] = useState('mixer');
 
   // Core Musical State
@@ -407,14 +430,13 @@ export default function App() {
   });
   const [soundSettings, setSoundSettings] = useState({
     drumKit: 'standard', 
-    bassSynth: 'sub', // Changed default to sub for better bass out of the box
+    bassSynth: 'sub', 
     chordSynth: 'epiano', 
     timbre: 50, 
     bassTimbre: 50,
     sustain: 50 
   });
 
-  // KEEP A REFERENCE TO CURRENT STATE SO THE AUDIO ENGINE CAN UPDATE ON-THE-FLY
   const stateRefs = useRef({ tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings });
   useEffect(() => {
     stateRefs.current = { tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings };
@@ -546,18 +568,15 @@ export default function App() {
     noiseSource.start(time); noiseSource.stop(time + 0.1);
   };
 
-  // FIX: Bass Pitch and Pitch Articulation
   const playBass = (freq, time, duration, type, timbre) => {
     if (!audioCtx || !masterGain) return;
     const osc = audioCtx.createOscillator();
     const filter = audioCtx.createBiquadFilter();
     const gain = audioCtx.createGain();
     
-    // Provide a higher floor for the filter so the actual bass harmonics aren't muffled into a "single thump"
     const cutoff = 150 + (timbre * 15); 
 
     if (type === 'sub') {
-      // Use triangle instead of sine so you can actually hear pitch changes on smaller speakers
       osc.type = 'triangle';
       filter.type = 'lowpass'; filter.frequency.value = cutoff;
     } else if (type === 'pluck') {
@@ -575,16 +594,14 @@ export default function App() {
     osc.frequency.value = freq;
     osc.connect(filter); filter.connect(gain); gain.connect(masterGain);
     
-    // Smooth Envelope to prevent clicking
     gain.gain.setValueAtTime(0, time); 
-    gain.gain.linearRampToValueAtTime(0.6, time + 0.02); // Quick attack
-    gain.gain.setValueAtTime(0.6, time + duration - 0.05); // Sustain
-    gain.gain.linearRampToValueAtTime(0, time + duration); // Smooth release
+    gain.gain.linearRampToValueAtTime(0.6, time + 0.02); 
+    gain.gain.setValueAtTime(0.6, time + duration - 0.05); 
+    gain.gain.linearRampToValueAtTime(0, time + duration); 
     
     osc.start(time); osc.stop(time + duration + 0.05);
   };
 
-  // FIX: Fluid Piano to remove click 
   const playKeys = (frequencies, time, duration, type, timbre) => {
     if (!audioCtx || !masterGain) return;
     const cutoff = 400 + (timbre * 36);
@@ -603,11 +620,10 @@ export default function App() {
       osc.frequency.value = freq;
       osc.connect(filter); filter.connect(gain); gain.connect(masterGain);
       
-      // Envelope with soft release tail so it is fluid instead of popping
       gain.gain.setValueAtTime(0, time); 
       gain.gain.linearRampToValueAtTime(type === 'supersaw' ? 0.08 : 0.15, time + 0.03); 
       gain.gain.setValueAtTime(type === 'supersaw' ? 0.08 : 0.15, time + duration); 
-      gain.gain.linearRampToValueAtTime(0, time + duration + 0.3); // Fade out naturally over 300ms
+      gain.gain.linearRampToValueAtTime(0, time + duration + 0.3); 
       
       osc.start(time); osc.stop(time + duration + 0.35); 
     });
@@ -673,7 +689,6 @@ export default function App() {
     });
   };
 
-  // Tailwind script injection
   useEffect(() => {
     if (document.getElementById('tailwind-cdn')) {
       setStylesLoaded(true);
@@ -692,7 +707,6 @@ export default function App() {
   const handleKeyChange = (delta) => setKeyIdx(idx => (idx + delta + ALL_KEYS.length) % ALL_KEYS.length);
 
   const scheduleNote = useCallback((beatNumber, time) => {
-    // Read entirely from stateRefs so changes happen instantly on the fly!
     const { tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings } = stateRefs.current;
     
     const style = STYLES[styleIdx] || STYLES[0];
@@ -712,7 +726,6 @@ export default function App() {
     }
 
     if (instruments.metronome) {
-       // Only play on quarter notes (beats 0, 4, 8, 12 in 16-step grid)
        if (beatNumber % 4 === 0) playClick(time, beatNumber === 0);
     }
 
@@ -829,7 +842,6 @@ export default function App() {
 
       setVocalUrl(null); setBackingUrl(null); setMixUrl(null);
 
-      // Clean up any stray old mic instances just in case
       if (micSourceNodeRef.current) {
         try { micSourceNodeRef.current.disconnect(); } catch (e) {}
         micSourceNodeRef.current = null;
@@ -938,6 +950,27 @@ export default function App() {
     setTempo(Math.floor(Math.random() * (maxTempo - minTempo + 0)) + minTempo);
   };
 
+  useEffect(() => {
+    return () => {
+      if (timerIDRef.current) clearTimeout(timerIDRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const currentUrl = vocalUrl;
+    return () => { if (currentUrl) URL.revokeObjectURL(currentUrl); };
+  }, [vocalUrl]);
+
+  useEffect(() => {
+    const currentUrl = backingUrl;
+    return () => { if (currentUrl) URL.revokeObjectURL(currentUrl); };
+  }, [backingUrl]);
+
+  useEffect(() => {
+    const currentUrl = mixUrl;
+    return () => { if (currentUrl) URL.revokeObjectURL(currentUrl); };
+  }, [mixUrl]);
+
   if (!stylesLoaded) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center text-indigo-400 font-sans">
@@ -946,9 +979,10 @@ export default function App() {
     );
   }
 
+  // FIX: Switched from lg:flex-row-reverse to proper centering rules for medium tablet screens.
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
-      <header className="px-6 py-4 flex justify-center items-center border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
+    <div className="min-h-[100dvh] bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+      <header className="px-6 py-4 flex justify-between items-center border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-indigo-600 rounded-lg shadow-[0_0_15px_rgba(79,70,229,0.3)]">
             <Music className="w-5 h-5 text-white" />
@@ -957,256 +991,297 @@ export default function App() {
             SongSketch
           </h1>
         </div>
+        <button 
+          onClick={() => setShowInstructions(!showInstructions)}
+          className={`p-2 rounded-full transition-colors ${showInstructions ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-indigo-400'}`}
+          title="Toggle Instructions"
+        >
+          <HelpCircle className="w-5 h-5" />
+        </button>
       </header>
 
-      <div className="flex flex-col max-w-md mx-auto px-6 py-6 pb-24 space-y-6">
+      <div className="flex flex-col lg:flex-row-reverse max-w-6xl mx-auto items-center lg:items-start justify-center gap-8 px-4 sm:px-6 py-6 lg:py-12">
         
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-3 flex items-start gap-3 text-sm text-blue-300">
-          <Headphones className="w-5 h-5 flex-shrink-0 mt-0.5" />
-          <p>For the best quality, use headphones while recording vocals.</p>
-        </div>
-
-        <div className="relative flex flex-col items-center justify-center py-6">
-          <div className={`w-48 h-48 rounded-full border-4 flex flex-col items-center justify-center transition-all duration-300 relative overflow-hidden ${
-            recordingState === 'recording' ? 'border-rose-500 shadow-[0_0_40px_rgba(244,63,94,0.3)] scale-105' : 
-            recordingState === 'paused' ? 'border-rose-900 shadow-[0_0_20px_rgba(244,63,94,0.15)]' :
-            transportState === 'playing' ? 'border-indigo-500 shadow-[0_0_40px_rgba(99,102,241,0.3)] scale-105' : 
-            'border-slate-700'
-          }`}>
-            {transportState === 'playing' && (
-              <div className="absolute inset-0 bg-indigo-500/5 animate-pulse rounded-full pointer-events-none" />
-            )}
-            <span className="text-[10px] uppercase tracking-widest text-slate-400 mb-1 font-bold opacity-60">
-              {recordingState === 'recording' ? 'RECORDING' : 
-               recordingState === 'paused' ? 'REC PAUSED' : 
-               transportState === 'playing' ? 'PLAYING' : 
-               transportState === 'paused' ? 'PAUSED' : 'READY'}
-            </span>
-            <div className="flex items-baseline gap-1">
-              <span className="text-5xl font-black tracking-tighter" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {activeChordName}
-              </span>
-            </div>
-            <div className="flex gap-2 mt-4">
-              {[0, 1, 2, 3].map(beat => (
-                <div key={beat} className={`w-3 h-3 rounded-full transition-all duration-150 ${
-                  transportState === 'playing' && currentBeat === beat 
-                    ? (recordingState === 'recording' ? 'bg-rose-500 scale-125' : 'bg-indigo-500 scale-125') 
-                    : 'bg-slate-700 scale-100'
-                }`} />
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 relative">
-          <DraggableCard label="Song Style" value={currentStyle.name} onDelta={handleStyleChange} />
-          <DraggableCard label="Tempo" value={`${tempo} BPM`} onDelta={handleTempoChange} />
-          <DraggableCard label="Musical Key" value={`${currentKey.root} ${currentKey.type}`} onDelta={handleKeyChange} />
-          <DraggableCard label="Progression" value={currentProgression.name} subValue={currentProgression.degrees.join(' - ')} onDelta={handleProgChange} />
-        </div>
-
-        {/* SOUND DESIGN PANEL */}
-        <div className="bg-slate-800/30 border border-slate-700/50 rounded-2xl overflow-hidden mt-6">
-          <div className="flex border-b border-slate-700/50">
-            <button onClick={() => setActiveTab('mixer')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${activeTab === 'mixer' ? 'bg-slate-700/50 text-indigo-400' : 'text-slate-500 hover:bg-slate-800/80 hover:text-slate-300'}`}>
-              <Sliders className="w-4 h-4" /> Mixer
-            </button>
-            <button onClick={() => setActiveTab('sounds')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${activeTab === 'sounds' ? 'bg-slate-700/50 text-indigo-400' : 'text-slate-500 hover:bg-slate-800/80 hover:text-slate-300'}`}>
-              <Settings className="w-4 h-4" /> Tweaks
-            </button>
-          </div>
-          
-          <div className="p-4">
-            {activeTab === 'mixer' && (
-              <div className="space-y-5">
-                <div className="flex justify-between gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                  {[
-                    { id: 'metronome', label: 'Click', icon: Bell },
-                    { id: 'drums', label: 'Drums', icon: Drum },
-                    { id: 'bass', label: 'Bass', icon: Speaker },
-                    { id: 'chords', label: 'Chords', icon: Layers },
-                    { id: 'pad', label: 'Pad', icon: Activity },
-                    { id: 'arp', label: 'Arp', icon: Music },
-                  ].map(inst => {
-                    const Icon = inst.icon;
-                    return (
-                      <button 
-                        key={inst.id}
-                        onClick={() => toggleInstrument(inst.id)}
-                        className={`flex flex-col items-center gap-2 min-w-[3.5rem] ${instruments[inst.id] ? 'text-indigo-400' : 'text-slate-600 hover:text-slate-400'}`}
-                      >
-                        <div className={`p-3 rounded-xl transition-all ${instruments[inst.id] ? 'bg-indigo-500/20 ring-1 ring-indigo-500/50' : 'bg-slate-800'}`}>
-                          <Icon className="w-5 h-5" />
-                        </div>
-                        <span className="text-[10px] font-semibold tracking-wider uppercase">{inst.label}</span>
-                      </button>
-                    );
-                  })}
+        {/* Sidebar Instructions */}
+        {showInstructions && (
+          <aside className="w-full max-w-md lg:w-72 bg-slate-800/40 border border-slate-700/50 rounded-3xl p-6 lg:sticky lg:top-24 h-fit animate-in fade-in slide-in-from-right-4 duration-500">
+            <h2 className="text-indigo-400 font-bold uppercase tracking-widest text-xs mb-4 flex items-center gap-2">
+               How to Start
+            </h2>
+            <ul className="space-y-6">
+              <li className="flex gap-3">
+                <div className="flex-shrink-0 w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-bold">1</div>
+                <div className="text-sm text-slate-300 leading-relaxed">
+                  <span className="text-slate-100 font-medium">Explore:</span> Swipe up or down on Style, Tempo, and Key cards to change settings.
                 </div>
-              </div>
-            )}
-
-            {activeTab === 'sounds' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Drum Kit</label>
-                    <select 
-                      value={soundSettings.drumKit} 
-                      onChange={(e) => updateSound('drumKit', e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    >
-                      <option value="standard">Standard</option>
-                      <option value="808">808 / Trap</option>
-                      <option value="acoustic">Acoustic</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Chord Synth</label>
-                    <select 
-                      value={soundSettings.chordSynth} 
-                      onChange={(e) => updateSound('chordSynth', e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    >
-                      <option value="epiano">E-Piano</option>
-                      <option value="supersaw">Super Saw</option>
-                      <option value="retro">Retro Square</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1.5 col-span-2">
-                    <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Bass Synth</label>
-                    <select 
-                      value={soundSettings.bassSynth} 
-                      onChange={(e) => updateSound('bassSynth', e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    >
-                      <option value="sub">Deep Sub</option>
-                      <option value="synth">Sawtooth</option>
-                      <option value="pluck">Square Pluck</option>
-                    </select>
-                  </div>
+              </li>
+              <li className="flex gap-3">
+                <div className="flex-shrink-0 w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-bold">2</div>
+                <div className="text-sm text-slate-300 leading-relaxed">
+                  <span className="text-slate-100 font-medium">Create:</span> Tap the <span className="text-rose-400">red mic</span> to start recording. Use headphones for the best sound.
                 </div>
-
-                <div className="pt-2 space-y-5">
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Overall Brightness</label>
-                      <span className="text-[10px] text-indigo-400 font-mono">{soundSettings.timbre}%</span>
-                    </div>
-                    <input 
-                      type="range" min="0" max="100" 
-                      value={soundSettings.timbre} 
-                      onChange={(e) => updateSound('timbre', parseInt(e.target.value))}
-                      className="w-full accent-indigo-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Bass Tone</label>
-                      <span className="text-[10px] text-indigo-400 font-mono">{soundSettings.bassTimbre}%</span>
-                    </div>
-                    <input 
-                      type="range" min="0" max="100" 
-                      value={soundSettings.bassTimbre} 
-                      onChange={(e) => updateSound('bassTimbre', parseInt(e.target.value))}
-                      className="w-full accent-indigo-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Note Sustain</label>
-                      <span className="text-[10px] text-indigo-400 font-mono">{soundSettings.sustain}%</span>
-                    </div>
-                    <input 
-                      type="range" min="0" max="100" 
-                      value={soundSettings.sustain} 
-                      onChange={(e) => updateSound('sustain', parseInt(e.target.value))}
-                      className="w-full accent-indigo-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                    />
-                  </div>
+              </li>
+              <li className="flex gap-3">
+                <div className="flex-shrink-0 w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-bold">3</div>
+                <div className="text-sm text-slate-300 leading-relaxed">
+                  <span className="text-slate-100 font-medium">Finish:</span> Tap the stop square to finalize your track and download it below.
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="flex justify-center items-center gap-5 py-6">
-          <button onClick={randomizeIdea} className="p-4 rounded-full bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-all active:scale-95 shadow-lg border border-slate-700/50" title="Randomize All">
-            <Shuffle className="w-5 h-5" />
-          </button>
-          
-          <button onClick={handleStop} disabled={transportState === 'stopped' && recordingState === 'idle'} className={`p-4 rounded-full transition-all active:scale-95 shadow-lg ${
-            transportState === 'stopped' && recordingState === 'idle'
-              ? 'bg-slate-800/30 text-slate-700 cursor-not-allowed border border-transparent'
-              : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700/50'
-          }`}>
-            <Square className="w-5 h-5 fill-current" />
-          </button>
-
-          <button onClick={handleRecordClick} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-xl ${
-            recordingState === 'recording' ? 'bg-rose-500 text-white shadow-[0_0_30px_rgba(244,63,94,0.4)]' : 
-            recordingState === 'paused' ? 'bg-rose-900 text-rose-300 border-2 border-rose-500' :
-            'bg-slate-800 text-rose-500 border-2 border-slate-700 hover:border-rose-500/50'
-          }`}>
-             <Mic className={`w-9 h-9 ${recordingState === 'recording' ? 'animate-pulse' : ''}`} />
-          </button>
-
-          <button onClick={handlePlayPause} className={`p-5 rounded-full transition-all active:scale-95 shadow-lg ${
-            transportState === 'playing' ? 'bg-indigo-600 text-white shadow-[0_0_25px_rgba(79,70,229,0.4)]' : 
-            'bg-slate-800 text-indigo-400 hover:bg-slate-700 border border-slate-700/50'
-          }`}>
-             {transportState === 'playing' ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 ml-1 fill-current" />}
-          </button>
-        </div>
-
-        {(vocalUrl || backingUrl || mixUrl) && (
-          <div className="mt-8 space-y-4 animate-in fade-in slide-in-from-bottom-6 duration-500">
-            <h3 className="text-sm font-bold flex items-center gap-2 border-b border-slate-800 pb-3 text-indigo-300 uppercase tracking-widest">
-              <Download className="w-4 h-4" /> Your Saved Ideas
-            </h3>
-            
-            {mixUrl && (
-              <div className="bg-emerald-900/20 rounded-2xl p-5 flex flex-col gap-3 shadow-lg border border-emerald-500/20">
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-emerald-400 flex items-center gap-2 text-sm uppercase tracking-wide">
-                    <Radio className="w-4 h-4" /> The Song (Full Mix)
-                  </span>
-                  <a href={mixUrl} download="songsketch_mix.wav" className="text-[10px] font-black bg-emerald-500 text-white px-4 py-2 rounded-full hover:bg-emerald-400 transition-colors shadow-lg uppercase tracking-tighter">
-                    Download WAV
-                  </a>
-                </div>
-                <audio key={mixUrl} src={mixUrl} controls className="w-full h-10 rounded-lg outline-none" />
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 gap-3">
-              {vocalUrl && (
-                <div className="bg-slate-800/60 rounded-2xl p-4 flex flex-col gap-3 border border-slate-700/50">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-rose-300 flex items-center gap-2 text-xs uppercase tracking-wide">
-                      <Mic className="w-4 h-4" /> Vocals Only
-                    </span>
-                    <a href={vocalUrl} download="songsketch_vocals.wav" className="text-[10px] font-bold bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-600 transition-colors uppercase">Save</a>
-                  </div>
-                  <audio key={vocalUrl} src={vocalUrl} controls className="w-full h-10 rounded-lg outline-none" />
-                </div>
-              )}
-              {backingUrl && (
-                <div className="bg-slate-800/60 rounded-2xl p-4 flex flex-col gap-3 border border-slate-700/50">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-indigo-300 flex items-center gap-2 text-xs uppercase tracking-wide">
-                      <Activity className="w-4 h-4" /> Instrumental
-                    </span>
-                    <a href={backingUrl} download="songsketch_backing.wav" className="text-[10px] font-bold bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-600 transition-colors uppercase">Save</a>
-                  </div>
-                  <audio key={backingUrl} src={backingUrl} controls className="w-full h-10 rounded-lg outline-none" />
-                </div>
-              )}
-            </div>
-          </div>
+              </li>
+            </ul>
+          </aside>
         )}
+
+        {/* Main App */}
+        <main className="w-full max-w-md lg:max-w-lg space-y-6 pb-24">
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-3 flex items-start gap-3 text-sm text-blue-300">
+            <Headphones className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <p>For the best quality, use headphones while recording vocals.</p>
+          </div>
+
+          <div className="relative flex flex-col items-center justify-center py-6">
+            <div className={`w-48 h-48 rounded-full border-4 flex flex-col items-center justify-center transition-all duration-300 relative overflow-hidden ${
+              recordingState === 'recording' ? 'border-rose-500 shadow-[0_0_40px_rgba(244,63,94,0.3)] scale-105' : 
+              recordingState === 'paused' ? 'border-rose-900 shadow-[0_0_20px_rgba(244,63,94,0.15)]' :
+              transportState === 'playing' ? 'border-indigo-500 shadow-[0_0_40px_rgba(99,102,241,0.3)] scale-105' : 
+              'border-slate-700'
+            }`}>
+              {transportState === 'playing' && (
+                <div className="absolute inset-0 bg-indigo-500/5 animate-pulse rounded-full pointer-events-none" />
+              )}
+              <span className="text-[10px] uppercase tracking-widest text-slate-400 mb-1 font-bold opacity-60">
+                {recordingState === 'recording' ? 'RECORDING' : 
+                 recordingState === 'paused' ? 'REC PAUSED' : 
+                 transportState === 'playing' ? 'PLAYING' : 
+                 transportState === 'paused' ? 'PAUSED' : 'READY'}
+              </span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-5xl font-black tracking-tighter" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {activeChordName}
+                </span>
+              </div>
+              <div className="flex gap-2 mt-4">
+                {[0, 1, 2, 3].map(beat => (
+                  <div key={beat} className={`w-3 h-3 rounded-full transition-all duration-150 ${
+                    transportState === 'playing' && currentBeat === beat 
+                      ? (recordingState === 'recording' ? 'bg-rose-500 scale-125' : 'bg-indigo-500 scale-125') 
+                      : 'bg-slate-700 scale-100'
+                  }`} />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 relative">
+            <DraggableCard label="Song Style" value={currentStyle.name} onDelta={handleStyleChange} />
+            <DraggableCard label="Tempo" value={`${tempo} BPM`} onDelta={handleTempoChange} />
+            <DraggableCard label="Musical Key" value={`${currentKey.root} ${currentKey.type}`} onDelta={handleKeyChange} />
+            <DraggableCard label="Progression" value={currentProgression.name} subValue={currentProgression.degrees.join(' - ')} onDelta={handleProgChange} />
+          </div>
+
+          {/* SOUND DESIGN PANEL */}
+          <div className="bg-slate-800/30 border border-slate-700/50 rounded-2xl overflow-hidden mt-6">
+            <div className="flex border-b border-slate-700/50">
+              <button onClick={() => setActiveTab('mixer')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${activeTab === 'mixer' ? 'bg-slate-700/50 text-indigo-400' : 'text-slate-500 hover:bg-slate-800/80 hover:text-slate-300'}`}>
+                <Sliders className="w-4 h-4" /> Mixer
+              </button>
+              <button onClick={() => setActiveTab('sounds')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${activeTab === 'sounds' ? 'bg-slate-700/50 text-indigo-400' : 'text-slate-500 hover:bg-slate-800/80 hover:text-slate-300'}`}>
+                <Settings className="w-4 h-4" /> Tweaks
+              </button>
+            </div>
+            
+            <div className="p-4">
+              {activeTab === 'mixer' && (
+                <div className="space-y-5">
+                  <div className="flex justify-between gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                    {[
+                      { id: 'metronome', label: 'Click', icon: Bell },
+                      { id: 'drums', label: 'Drums', icon: Drum },
+                      { id: 'bass', label: 'Bass', icon: Speaker },
+                      { id: 'chords', label: 'Chords', icon: Layers },
+                      { id: 'pad', label: 'Pad', icon: Activity },
+                      { id: 'arp', label: 'Arp', icon: Music },
+                    ].map(inst => {
+                      const Icon = inst.icon;
+                      return (
+                        <button 
+                          key={inst.id}
+                          onClick={() => toggleInstrument(inst.id)}
+                          className={`flex flex-col items-center gap-2 min-w-[3.5rem] ${instruments[inst.id] ? 'text-indigo-400' : 'text-slate-600 hover:text-slate-400'}`}
+                        >
+                          <div className={`p-3 rounded-xl transition-all ${instruments[inst.id] ? 'bg-indigo-500/20 ring-1 ring-indigo-500/50' : 'bg-slate-800'}`}>
+                            <Icon className="w-5 h-5" />
+                          </div>
+                          <span className="text-[10px] font-semibold tracking-wider uppercase">{inst.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'sounds' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Drum Kit</label>
+                      <select 
+                        value={soundSettings.drumKit} 
+                        onChange={(e) => updateSound('drumKit', e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="standard">Standard</option>
+                        <option value="808">808 / Trap</option>
+                        <option value="acoustic">Acoustic</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Chord Synth</label>
+                      <select 
+                        value={soundSettings.chordSynth} 
+                        onChange={(e) => updateSound('chordSynth', e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="epiano">E-Piano</option>
+                        <option value="supersaw">Super Saw</option>
+                        <option value="retro">Retro Square</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                      <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Bass Synth</label>
+                      <select 
+                        value={soundSettings.bassSynth} 
+                        onChange={(e) => updateSound('bassSynth', e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="sub">Deep Sub</option>
+                        <option value="synth">Sawtooth</option>
+                        <option value="pluck">Square Pluck</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 space-y-5">
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Overall Brightness</label>
+                        <span className="text-[10px] text-indigo-400 font-mono">{soundSettings.timbre}%</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="100" 
+                        value={soundSettings.timbre} 
+                        onChange={(e) => updateSound('timbre', parseInt(e.target.value))}
+                        className="w-full accent-indigo-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Bass Tone</label>
+                        <span className="text-[10px] text-indigo-400 font-mono">{soundSettings.bassTimbre}%</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="100" 
+                        value={soundSettings.bassTimbre} 
+                        onChange={(e) => updateSound('bassTimbre', parseInt(e.target.value))}
+                        className="w-full accent-indigo-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Note Sustain</label>
+                        <span className="text-[10px] text-indigo-400 font-mono">{soundSettings.sustain}%</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="100" 
+                        value={soundSettings.sustain} 
+                        onChange={(e) => updateSound('sustain', parseInt(e.target.value))}
+                        className="w-full accent-indigo-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-center items-center gap-5 py-6">
+            <button onClick={randomizeIdea} className="p-4 rounded-full bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-all active:scale-95 shadow-lg border border-slate-700/50" title="Randomize All">
+              <Shuffle className="w-5 h-5" />
+            </button>
+            
+            <button onClick={handleStop} disabled={transportState === 'stopped' && recordingState === 'idle'} className={`p-4 rounded-full transition-all active:scale-95 shadow-lg ${
+              transportState === 'stopped' && recordingState === 'idle'
+                ? 'bg-slate-800/30 text-slate-700 cursor-not-allowed border border-transparent'
+                : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700/50'
+            }`}>
+              <Square className="w-5 h-5 fill-current" />
+            </button>
+
+            <button onClick={handleRecordClick} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-xl ${
+              recordingState === 'recording' ? 'bg-rose-500 text-white shadow-[0_0_30px_rgba(244,63,94,0.4)]' : 
+              recordingState === 'paused' ? 'bg-rose-900 text-rose-300 border-2 border-rose-500' :
+              'bg-slate-800 text-rose-500 border-2 border-slate-700 hover:border-rose-500/50'
+            }`}>
+               <Mic className={`w-9 h-9 ${recordingState === 'recording' ? 'animate-pulse' : ''}`} />
+            </button>
+
+            <button onClick={handlePlayPause} className={`p-5 rounded-full transition-all active:scale-95 shadow-lg ${
+              transportState === 'playing' ? 'bg-indigo-600 text-white shadow-[0_0_25px_rgba(79,70,229,0.4)]' : 
+              'bg-slate-800 text-indigo-400 hover:bg-slate-700 border border-slate-700/50'
+            }`}>
+               {transportState === 'playing' ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 ml-1 fill-current" />}
+            </button>
+          </div>
+
+          {(vocalUrl || backingUrl || mixUrl) && (
+            <div className="mt-8 space-y-4 animate-in fade-in slide-in-from-bottom-6 duration-500">
+              <h3 className="text-sm font-bold flex items-center gap-2 border-b border-slate-800 pb-3 text-indigo-300 uppercase tracking-widest">
+                <Download className="w-4 h-4" /> Your Saved Ideas
+              </h3>
+              
+              {mixUrl && (
+                <div className="bg-emerald-900/20 rounded-2xl p-5 flex flex-col gap-3 shadow-lg border border-emerald-500/20">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-emerald-400 flex items-center gap-2 text-sm uppercase tracking-wide">
+                      <Radio className="w-4 h-4" /> The Song (Full Mix)
+                    </span>
+                    <a href={mixUrl} download="songsketch_mix.wav" className="text-[10px] font-black bg-emerald-500 text-white px-4 py-2 rounded-full hover:bg-emerald-400 transition-colors shadow-lg uppercase tracking-tighter">
+                      Download WAV
+                    </a>
+                  </div>
+                  <audio key={mixUrl} src={mixUrl} controls className="w-full h-10 rounded-lg outline-none" />
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-3">
+                {vocalUrl && (
+                  <div className="bg-slate-800/60 rounded-2xl p-4 flex flex-col gap-3 border border-slate-700/50">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-rose-300 flex items-center gap-2 text-xs uppercase tracking-wide">
+                        <Mic className="w-4 h-4" /> Vocals Only
+                      </span>
+                      <a href={vocalUrl} download="songsketch_vocals.wav" className="text-[10px] font-bold bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-600 transition-colors uppercase">Save</a>
+                    </div>
+                    <audio key={vocalUrl} src={vocalUrl} controls className="w-full h-10 rounded-lg outline-none" />
+                  </div>
+                )}
+                {backingUrl && (
+                  <div className="bg-slate-800/60 rounded-2xl p-4 flex flex-col gap-3 border border-slate-700/50">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-indigo-300 flex items-center gap-2 text-xs uppercase tracking-wide">
+                        <Activity className="w-4 h-4" /> Instrumental
+                      </span>
+                      <a href={backingUrl} download="songsketch_backing.wav" className="text-[10px] font-bold bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-600 transition-colors uppercase">Save</a>
+                    </div>
+                    <audio key={backingUrl} src={backingUrl} controls className="w-full h-10 rounded-lg outline-none" />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </main>
       </div>
     </div>
   );
 }
+
+
