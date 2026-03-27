@@ -3,61 +3,37 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Mic, Play, Pause, Square, Shuffle, Download, 
   Headphones, Music, Activity, ChevronUp, ChevronDown, Radio, HelpCircle,
-  Settings, Sliders, Bell, Layers, Speaker, Drum
+  Settings, Sliders, Bell, Layers, Speaker, Drum, ListMusic, Grid
 } from 'lucide-react';
-
-// --- TYPES & INTERFACES ---
-
-interface KeyDef {
-  root: string;
-  type: 'Major' | 'Minor';
-  rootIdx: number;
-}
-
-interface StyleDef {
-  name: string;
-  tempoRange: [number, number];
-  kick: number[];
-  snare: number[];
-  hat: number[];
-  bass: number[];
-  keys: number[];
-  pad?: number[];
-  guitar?: number[];
-}
-
-interface ProgressionDef {
-  name: string;
-  degrees: number[];
-}
 
 // --- MUSICAL ENGINE DATA ---
 
 const ROOT_NOTES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 
-const ALL_KEYS: KeyDef[] = [];
+const ALL_KEYS = [];
 ROOT_NOTES.forEach((root, i) => {
   ALL_KEYS.push({ root, type: 'Major', rootIdx: i });
   ALL_KEYS.push({ root, type: 'Minor', rootIdx: i });
 });
 
-const SCALES: Record<'Major' | 'Minor', number[]> = {
+const SCALES = {
   'Major': [0, 2, 4, 5, 7, 9, 11],
   'Minor': [0, 2, 3, 5, 7, 8, 10]
 };
 
-const CHORD_QUALITIES: Record<'Major' | 'Minor', string[]> = {
+const CHORD_QUALITIES = {
   'Major': ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'],
   'Minor': ['min', 'dim', 'maj', 'min', 'min', 'maj', 'maj']
 };
 
-const CHORD_OFFSETS: Record<string, number[]> = {
+const CHORD_OFFSETS = {
   'maj': [0, 4, 7],
   'min': [0, 3, 7],
   'dim': [0, 3, 6],
 };
 
-const PROGRESSIONS: ProgressionDef[] = [
+const PROGRESSIONS = [
+  // Standard 4-Bar Progressions
   { name: "Pop Anthem", degrees: [1, 5, 6, 4] },
   { name: "Moody", degrees: [6, 4, 1, 5] },
   { name: "Smooth", degrees: [4, 3, 2, 1] },
@@ -70,6 +46,7 @@ const PROGRESSIONS: ProgressionDef[] = [
   { name: "Ascent", degrees: [1, 2, 3, 4] },
   { name: "Vamp", degrees: [1, 4, 1, 4] },
   { name: "Club Loop", degrees: [2, 4, 6, 5] },
+  // Extended 8-Bar Progressions
   { name: "Pop 8-Bar Epic", degrees: [1, 5, 6, 4, 1, 5, 4, 4] },
   { name: "Jazz Journey", degrees: [2, 5, 1, 6, 2, 5, 1, 1] },
   { name: "Storyteller", degrees: [1, 6, 4, 5, 6, 3, 4, 5] },
@@ -79,7 +56,7 @@ const PROGRESSIONS: ProgressionDef[] = [
 
 const ZEROS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-const STYLES: StyleDef[] = [
+const STYLES = [
   {
     name: "Pop", tempoRange: [100, 130],
     kick:  [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
@@ -420,14 +397,28 @@ export default function App() {
   const [progIdx, setProgIdx] = useState(0);
   const [keyIdx, setKeyIdx] = useState(0); 
 
-  const currentStyle = STYLES[styleIdx] || STYLES[0];
-  const currentProgression = PROGRESSIONS[progIdx] || PROGRESSIONS[0];
-  const currentKey = ALL_KEYS[keyIdx] || ALL_KEYS[0];
+  // Custom Progression State
+  const [customProgStr, setCustomProgStr] = useState("1 4 5 4");
   
+  // Custom Drum Sequencer State
+  const [activeDrums, setActiveDrums] = useState({
+    kick: STYLES[0].kick,
+    snare: STYLES[0].snare,
+    hat: STYLES[0].hat
+  });
+  
+  // Track exact 16th note step for the sequencer UI highlight
+  const [currentStep, setCurrentStep] = useState(0);
+
   // Advanced Sound Design State
   const [instruments, setInstruments] = useState({
-    metronome: false, drums: true, bass: true, chords: true, pad: false, arp: false
+    metronome: false, drums: true, bass: true, chords: true, pad: false, arp: false, guitar: true
   });
+  
+  const [volumes, setVolumes] = useState({
+    metronome: 50, drums: 80, bass: 80, chords: 80, pad: 60, arp: 60, guitar: 80
+  });
+
   const [soundSettings, setSoundSettings] = useState({
     drumKit: 'standard', 
     bassSynth: 'sub', 
@@ -437,10 +428,30 @@ export default function App() {
     sustain: 50 
   });
 
-  const stateRefs = useRef({ tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings });
+  // Calculate the custom degrees safely
+  const customDegreesParsed = customProgStr.split(/[\s,]+/).map(Number).filter(n => !isNaN(n) && n >= 1 && n <= 7);
+  const validCustomDegrees = customDegreesParsed.length > 0 ? customDegreesParsed : [1];
+
+  // Append custom progression to the list dynamically
+  const ALL_PROGS = [...PROGRESSIONS, { name: "Custom (Edit Below)", degrees: validCustomDegrees }];
+
+  const currentStyle = STYLES[styleIdx] || STYLES[0];
+  const currentProgression = ALL_PROGS[progIdx] || ALL_PROGS[0];
+  const currentKey = ALL_KEYS[keyIdx] || ALL_KEYS[0];
+
+  // Sync drums when style changes
   useEffect(() => {
-    stateRefs.current = { tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings };
-  }, [tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings]);
+    setActiveDrums({
+      kick: [...(STYLES[styleIdx] || STYLES[0]).kick],
+      snare: [...(STYLES[styleIdx] || STYLES[0]).snare],
+      hat: [...(STYLES[styleIdx] || STYLES[0]).hat]
+    });
+  }, [styleIdx]);
+
+  const stateRefs = useRef({ tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings, volumes, validCustomDegrees, ALL_PROGS, activeDrums });
+  useEffect(() => {
+    stateRefs.current = { tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings, volumes, validCustomDegrees, ALL_PROGS, activeDrums };
+  }, [tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings, volumes, validCustomDegrees, ALL_PROGS, activeDrums]);
   
   // Audio Exports
   const [vocalUrl, setVocalUrl] = useState(null);
@@ -467,30 +478,34 @@ export default function App() {
   const micStreamRef = useRef(null);
   const micSourceNodeRef = useRef(null);
 
-  const toggleInstrument = (inst) => {
-    setInstruments(prev => ({ ...prev, [inst]: !prev[inst] }));
-  };
+  const toggleInstrument = (inst) => setInstruments(prev => ({ ...prev, [inst]: !prev[inst] }));
+  const updateVolume = (inst, val) => setVolumes(prev => ({ ...prev, [inst]: val }));
+  const updateSound = (key, value) => setSoundSettings(prev => ({ ...prev, [key]: value }));
 
-  const updateSound = (key, value) => {
-    setSoundSettings(prev => ({ ...prev, [key]: value }));
+  const toggleDrumStep = (track, step) => {
+    setActiveDrums(prev => {
+      const newTrack = [...prev[track]];
+      newTrack[step] = newTrack[step] ? 0 : 1;
+      return { ...prev, [track]: newTrack };
+    });
   };
 
   // --- SYNTHESIZERS ---
 
-  const playClick = (time, isDownbeat) => {
-    if (!audioCtx || !masterGain) return;
+  const playClick = (time, isDownbeat, vol) => {
+    if (!audioCtx || !masterGain || vol <= 0) return;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = 'square';
     osc.frequency.value = isDownbeat ? 1000 : 500;
     osc.connect(gain); gain.connect(masterGain);
-    gain.gain.setValueAtTime(0.3, time);
+    gain.gain.setValueAtTime(0.3 * vol, time);
     gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
     osc.start(time); osc.stop(time + 0.05);
   };
 
-  const playKick = (time, kit) => {
-    if (!audioCtx || !masterGain) return;
+  const playKick = (time, kit, vol) => {
+    if (!audioCtx || !masterGain || vol <= 0) return;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.connect(gain); gain.connect(masterGain);
@@ -498,26 +513,26 @@ export default function App() {
     if (kit === '808') {
       osc.frequency.setValueAtTime(100, time);
       osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.8);
-      gain.gain.setValueAtTime(1.0, time);
-      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.8);
+      gain.gain.setValueAtTime(1.0 * vol, time);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.8);
       osc.start(time); osc.stop(time + 0.8);
     } else if (kit === 'acoustic') {
       osc.frequency.setValueAtTime(120, time);
       osc.frequency.exponentialRampToValueAtTime(30, time + 0.1);
-      gain.gain.setValueAtTime(0.9, time);
-      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+      gain.gain.setValueAtTime(0.9 * vol, time);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
       osc.start(time); osc.stop(time + 0.2);
     } else { // standard
       osc.frequency.setValueAtTime(150, time);
       osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.5);
-      gain.gain.setValueAtTime(0.8, time);
-      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
+      gain.gain.setValueAtTime(0.8 * vol, time);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
       osc.start(time); osc.stop(time + 0.5);
     }
   };
 
-  const playSnare = (time, kit) => {
-    if (!audioCtx || !masterGain || !noiseBuffer) return;
+  const playSnare = (time, kit, vol) => {
+    if (!audioCtx || !masterGain || !noiseBuffer || vol <= 0) return;
     const noiseSource = audioCtx.createBufferSource();
     noiseSource.buffer = noiseBuffer;
     const noiseFilter = audioCtx.createBiquadFilter();
@@ -525,13 +540,13 @@ export default function App() {
     
     if (kit === '808') {
       noiseFilter.type = 'highpass'; noiseFilter.frequency.value = 1500;
-      noiseGain.gain.setValueAtTime(1, time); noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+      noiseGain.gain.setValueAtTime(1.0 * vol, time); noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
     } else if (kit === 'acoustic') {
       noiseFilter.type = 'bandpass'; noiseFilter.frequency.value = 2000;
-      noiseGain.gain.setValueAtTime(1, time); noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.25);
+      noiseGain.gain.setValueAtTime(1.0 * vol, time); noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
     } else {
       noiseFilter.type = 'highpass'; noiseFilter.frequency.value = 1000;
-      noiseGain.gain.setValueAtTime(1, time); noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+      noiseGain.gain.setValueAtTime(1.0 * vol, time); noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
     }
 
     noiseSource.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(masterGain);
@@ -544,17 +559,17 @@ export default function App() {
     
     if (kit === '808') {
       osc.frequency.setValueAtTime(300, time);
-      oscGain.gain.setValueAtTime(0.8, time); oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+      oscGain.gain.setValueAtTime(0.8 * vol, time); oscGain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
     } else {
       osc.frequency.setValueAtTime(250, time);
-      oscGain.gain.setValueAtTime(0.7, time); oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+      oscGain.gain.setValueAtTime(0.7 * vol, time); oscGain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
     }
     
     osc.start(time); osc.stop(time + 0.15);
   };
 
-  const playHat = (time, kit) => {
-    if (!audioCtx || !masterGain || !noiseBuffer) return;
+  const playHat = (time, kit, vol) => {
+    if (!audioCtx || !masterGain || !noiseBuffer || vol <= 0) return;
     const noiseSource = audioCtx.createBufferSource();
     noiseSource.buffer = noiseBuffer;
     const noiseFilter = audioCtx.createBiquadFilter();
@@ -563,13 +578,13 @@ export default function App() {
     const noiseGain = audioCtx.createGain();
     noiseSource.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(masterGain);
     
-    noiseGain.gain.setValueAtTime(0.3, time);
-    noiseGain.gain.exponentialRampToValueAtTime(0.01, time + (kit === '808' ? 0.03 : 0.05));
+    noiseGain.gain.setValueAtTime(0.3 * vol, time);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, time + (kit === '808' ? 0.03 : 0.05));
     noiseSource.start(time); noiseSource.stop(time + 0.1);
   };
 
-  const playBass = (freq, time, duration, type, timbre) => {
-    if (!audioCtx || !masterGain) return;
+  const playBass = (freq, time, duration, type, timbre, vol) => {
+    if (!audioCtx || !masterGain || vol <= 0) return;
     const osc = audioCtx.createOscillator();
     const filter = audioCtx.createBiquadFilter();
     const gain = audioCtx.createGain();
@@ -595,15 +610,15 @@ export default function App() {
     osc.connect(filter); filter.connect(gain); gain.connect(masterGain);
     
     gain.gain.setValueAtTime(0, time); 
-    gain.gain.linearRampToValueAtTime(0.6, time + 0.02); 
-    gain.gain.setValueAtTime(0.6, time + duration - 0.05); 
+    gain.gain.linearRampToValueAtTime(0.6 * vol, time + 0.02); 
+    gain.gain.setValueAtTime(0.6 * vol, time + duration - 0.05); 
     gain.gain.linearRampToValueAtTime(0, time + duration); 
     
     osc.start(time); osc.stop(time + duration + 0.05);
   };
 
-  const playKeys = (frequencies, time, duration, type, timbre) => {
-    if (!audioCtx || !masterGain) return;
+  const playKeys = (frequencies, time, duration, type, timbre, vol) => {
+    if (!audioCtx || !masterGain || vol <= 0) return;
     const cutoff = 400 + (timbre * 36);
 
     frequencies.forEach(freq => {
@@ -620,17 +635,19 @@ export default function App() {
       osc.frequency.value = freq;
       osc.connect(filter); filter.connect(gain); gain.connect(masterGain);
       
+      const peak = (type === 'supersaw' ? 0.08 : 0.15) * vol;
+      
       gain.gain.setValueAtTime(0, time); 
-      gain.gain.linearRampToValueAtTime(type === 'supersaw' ? 0.08 : 0.15, time + 0.03); 
-      gain.gain.setValueAtTime(type === 'supersaw' ? 0.08 : 0.15, time + duration); 
+      gain.gain.linearRampToValueAtTime(peak, time + 0.03); 
+      gain.gain.setValueAtTime(peak, time + duration); 
       gain.gain.linearRampToValueAtTime(0, time + duration + 0.3); 
       
       osc.start(time); osc.stop(time + duration + 0.35); 
     });
   };
 
-  const playPad = (frequencies, time, duration, timbre) => {
-    if (!audioCtx || !masterGain) return;
+  const playPad = (frequencies, time, duration, timbre, vol) => {
+    if (!audioCtx || !masterGain || vol <= 0) return;
     const cutoff = 300 + (timbre * 17);
     frequencies.forEach(freq => {
       const osc = audioCtx.createOscillator();
@@ -644,15 +661,15 @@ export default function App() {
       osc.connect(filter); filter.connect(gain); gain.connect(masterGain);
       
       gain.gain.setValueAtTime(0, time);
-      gain.gain.linearRampToValueAtTime(0.06, time + 0.5); 
+      gain.gain.linearRampToValueAtTime(0.06 * vol, time + 0.5); 
       gain.gain.setTargetAtTime(0, time + duration, 0.3); 
       
       osc.start(time); osc.stop(time + duration + 2.0);
     });
   };
 
-  const playArp = (frequencies, time, stepDuration, beatNumber, timbre) => {
-     if (!audioCtx || !masterGain) return;
+  const playArp = (frequencies, time, stepDuration, beatNumber, timbre, vol) => {
+     if (!audioCtx || !masterGain || vol <= 0) return;
      const note = frequencies[beatNumber % frequencies.length];
      const osc = audioCtx.createOscillator();
      const gain = audioCtx.createGain();
@@ -665,14 +682,14 @@ export default function App() {
      filter.frequency.exponentialRampToValueAtTime(200, time + stepDuration * 0.8);
      
      osc.connect(filter); filter.connect(gain); gain.connect(masterGain);
-     gain.gain.setValueAtTime(0.1, time);
+     gain.gain.setValueAtTime(0.1 * vol, time);
      gain.gain.exponentialRampToValueAtTime(0.001, time + stepDuration * 0.9);
      
      osc.start(time); osc.stop(time + stepDuration);
   };
 
-  const playGuitar = (frequencies, time, duration) => {
-    if (!audioCtx || !masterGain) return;
+  const playGuitar = (frequencies, time, duration, vol) => {
+    if (!audioCtx || !masterGain || vol <= 0) return;
     frequencies.forEach((freq, i) => {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
@@ -682,7 +699,7 @@ export default function App() {
       
       const strumDelay = time + (i * 0.02); 
       gain.gain.setValueAtTime(0, strumDelay);
-      gain.gain.linearRampToValueAtTime(0.15, strumDelay + 0.02);
+      gain.gain.linearRampToValueAtTime(0.15 * vol, strumDelay + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, strumDelay + duration);
       
       osc.start(strumDelay); osc.stop(strumDelay + duration + 0.1);
@@ -703,51 +720,58 @@ export default function App() {
 
   const handleTempoChange = (delta) => setTempo(t => Math.max(60, Math.min(180, t + delta)));
   const handleStyleChange = (delta) => setStyleIdx(idx => (idx + delta + STYLES.length) % STYLES.length);
-  const handleProgChange = (delta) => setProgIdx(idx => (idx + delta + PROGRESSIONS.length) % PROGRESSIONS.length);
   const handleKeyChange = (delta) => setKeyIdx(idx => (idx + delta + ALL_KEYS.length) % ALL_KEYS.length);
+  const handleProgChange = (delta) => {
+    setProgIdx(idx => {
+      const numProgs = stateRefs.current.ALL_PROGS.length;
+      return (idx + delta + numProgs) % numProgs;
+    });
+  };
 
   const scheduleNote = useCallback((beatNumber, time) => {
-    const { tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings } = stateRefs.current;
+    const { tempo, styleIdx, progIdx, keyIdx, instruments, soundSettings, volumes, ALL_PROGS, activeDrums } = stateRefs.current;
     
     const style = STYLES[styleIdx] || STYLES[0];
-    const progression = PROGRESSIONS[progIdx] || PROGRESSIONS[0];
+    const progression = ALL_PROGS[progIdx] || ALL_PROGS[0];
     const stepDuration = (60.0 / tempo) * 0.25;
     
     const sustainMult = 0.2 + (soundSettings.sustain / 50); 
+    const vol = (id) => volumes[id] / 100;
     
     const degree = progression.degrees[barCountRef.current % progression.degrees.length];
     const chordDetails = getChordDetails(keyIdx, degree);
 
-    if (beatNumber % 4 === 0) {
-      requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (beatNumber % 4 === 0) {
         setCurrentBeat(beatNumber / 4);
         setActiveChordName(chordDetails.name);
-      });
-    }
+      }
+      setCurrentStep(beatNumber % 16);
+    });
 
     if (instruments.metronome) {
-       if (beatNumber % 4 === 0) playClick(time, beatNumber === 0);
+       if (beatNumber % 4 === 0) playClick(time, beatNumber === 0, vol('metronome'));
     }
 
     if (instruments.drums) {
-      if (style.kick[beatNumber]) playKick(time, soundSettings.drumKit);
-      if (style.snare[beatNumber]) playSnare(time, soundSettings.drumKit);
-      if (style.hat[beatNumber]) playHat(time, soundSettings.drumKit);
+      if (activeDrums.kick[beatNumber]) playKick(time, soundSettings.drumKit, vol('drums'));
+      if (activeDrums.snare[beatNumber]) playSnare(time, soundSettings.drumKit, vol('drums'));
+      if (activeDrums.hat[beatNumber]) playHat(time, soundSettings.drumKit, vol('drums'));
     }
     if (instruments.bass && style.bass[beatNumber]) {
-      playBass(chordDetails.bassFreq, time, stepDuration * 0.9 * sustainMult, soundSettings.bassSynth, soundSettings.bassTimbre);
+      playBass(chordDetails.bassFreq, time, stepDuration * 0.9 * sustainMult, soundSettings.bassSynth, soundSettings.bassTimbre, vol('bass'));
     }
     if (instruments.chords && style.keys[beatNumber]) {
-      playKeys(chordDetails.freqs, time, stepDuration * 3.5 * sustainMult, soundSettings.chordSynth, soundSettings.timbre);
+      playKeys(chordDetails.freqs, time, stepDuration * 3.5 * sustainMult, soundSettings.chordSynth, soundSettings.timbre, vol('chords'));
     }
     if (instruments.pad && (beatNumber === 0 || beatNumber === 8)) {
-      playPad(chordDetails.freqs, time, stepDuration * 8, soundSettings.timbre);
+      playPad(chordDetails.freqs, time, stepDuration * 8, soundSettings.timbre, vol('pad'));
     }
     if (instruments.arp) {
-      playArp(chordDetails.freqs, time, stepDuration, beatNumber, soundSettings.timbre);
+      playArp(chordDetails.freqs, time, stepDuration, beatNumber, soundSettings.timbre, vol('arp'));
     }
-    if (style.guitar && style.guitar[beatNumber]) {
-      playGuitar(chordDetails.freqs, time, stepDuration * 4);
+    if (instruments.guitar && style.guitar && style.guitar[beatNumber]) {
+      playGuitar(chordDetails.freqs, time, stepDuration * 4, vol('guitar'));
     }
 
   }, []);
@@ -777,8 +801,8 @@ export default function App() {
     if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
     
     if (transportState === 'stopped') {
-      const { progIdx, keyIdx } = stateRefs.current;
-      const degree = PROGRESSIONS[progIdx].degrees[0];
+      const { progIdx, keyIdx, ALL_PROGS } = stateRefs.current;
+      const degree = ALL_PROGS[progIdx].degrees[0];
       const chordDetails = getChordDetails(keyIdx, degree);
       setActiveChordName(chordDetails.name);
       currentBeatRef.current = 0;
@@ -796,6 +820,7 @@ export default function App() {
     if (timerIDRef.current) clearTimeout(timerIDRef.current);
     setTransportState('stopped');
     setCurrentBeat(0);
+    setCurrentStep(0);
     barCountRef.current = 0;
     currentBeatRef.current = 0;
     setActiveChordName('...');
@@ -842,6 +867,7 @@ export default function App() {
 
       setVocalUrl(null); setBackingUrl(null); setMixUrl(null);
 
+      // Clean up any stray old mic instances just in case
       if (micSourceNodeRef.current) {
         try { micSourceNodeRef.current.disconnect(); } catch (e) {}
         micSourceNodeRef.current = null;
@@ -950,6 +976,7 @@ export default function App() {
     setTempo(Math.floor(Math.random() * (maxTempo - minTempo + 0)) + minTempo);
   };
 
+  // CLEANUP HOOKS
   useEffect(() => {
     return () => {
       if (timerIDRef.current) clearTimeout(timerIDRef.current);
@@ -979,7 +1006,26 @@ export default function App() {
     );
   }
 
-  // FIX: Switched from lg:flex-row-reverse to proper centering rules for medium tablet screens.
+  // Helper for rendering Drum Sequencer rows
+  const renderSequencerRow = (label, trackId) => (
+    <div className="flex items-center gap-2 mb-3">
+      <span className="w-8 text-[10px] text-slate-400 font-bold uppercase tracking-wider">{label}</span>
+      <div className="flex flex-1 gap-1">
+        {activeDrums[trackId].map((isActive, i) => (
+          <button
+            key={i}
+            onClick={() => toggleDrumStep(trackId, i)}
+            className={`flex-1 h-8 rounded-sm transition-all ${i % 4 === 3 ? 'mr-1.5' : ''} ${
+              isActive
+                ? currentStep === i ? 'bg-indigo-300' : 'bg-indigo-500'
+                : currentStep === i ? 'bg-slate-600' : 'bg-slate-800'
+            }`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-[100dvh] bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
       <header className="px-6 py-4 flex justify-between items-center border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50">
@@ -1062,7 +1108,7 @@ export default function App() {
               <div className="flex gap-2 mt-4">
                 {[0, 1, 2, 3].map(beat => (
                   <div key={beat} className={`w-3 h-3 rounded-full transition-all duration-150 ${
-                    transportState === 'playing' && currentBeat === beat 
+                    transportState === 'playing' && Math.floor(currentStep / 4) === beat 
                       ? (recordingState === 'recording' ? 'bg-rose-500 scale-125' : 'bg-indigo-500 scale-125') 
                       : 'bg-slate-700 scale-100'
                   }`} />
@@ -1084,38 +1130,66 @@ export default function App() {
               <button onClick={() => setActiveTab('mixer')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${activeTab === 'mixer' ? 'bg-slate-700/50 text-indigo-400' : 'text-slate-500 hover:bg-slate-800/80 hover:text-slate-300'}`}>
                 <Sliders className="w-4 h-4" /> Mixer
               </button>
+              <button onClick={() => setActiveTab('beats')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${activeTab === 'beats' ? 'bg-slate-700/50 text-indigo-400' : 'text-slate-500 hover:bg-slate-800/80 hover:text-slate-300'}`}>
+                <Grid className="w-4 h-4" /> Beats
+              </button>
               <button onClick={() => setActiveTab('sounds')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${activeTab === 'sounds' ? 'bg-slate-700/50 text-indigo-400' : 'text-slate-500 hover:bg-slate-800/80 hover:text-slate-300'}`}>
                 <Settings className="w-4 h-4" /> Tweaks
+              </button>
+              <button onClick={() => setActiveTab('chords')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${activeTab === 'chords' ? 'bg-slate-700/50 text-indigo-400' : 'text-slate-500 hover:bg-slate-800/80 hover:text-slate-300'}`}>
+                <ListMusic className="w-4 h-4" /> Chords
               </button>
             </div>
             
             <div className="p-4">
               {activeTab === 'mixer' && (
-                <div className="space-y-5">
-                  <div className="flex justify-between gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                    {[
-                      { id: 'metronome', label: 'Click', icon: Bell },
-                      { id: 'drums', label: 'Drums', icon: Drum },
-                      { id: 'bass', label: 'Bass', icon: Speaker },
-                      { id: 'chords', label: 'Chords', icon: Layers },
-                      { id: 'pad', label: 'Pad', icon: Activity },
-                      { id: 'arp', label: 'Arp', icon: Music },
-                    ].map(inst => {
-                      const Icon = inst.icon;
-                      return (
+                <div className="space-y-4 max-h-64 overflow-y-auto pr-2 scrollbar-hide">
+                  {[
+                    { id: 'metronome', label: 'Click', icon: Bell },
+                    { id: 'drums', label: 'Drums', icon: Drum },
+                    { id: 'bass', label: 'Bass', icon: Speaker },
+                    { id: 'chords', label: 'Chords', icon: Layers },
+                    { id: 'guitar', label: 'Guitar', icon: Activity },
+                    { id: 'pad', label: 'Pad', icon: Activity },
+                    { id: 'arp', label: 'Arp', icon: Music },
+                  ].map(inst => {
+                    const Icon = inst.icon;
+                    const isActive = instruments[inst.id];
+                    return (
+                      <div key={inst.id} className="flex items-center gap-4">
                         <button 
-                          key={inst.id}
                           onClick={() => toggleInstrument(inst.id)}
-                          className={`flex flex-col items-center gap-2 min-w-[3.5rem] ${instruments[inst.id] ? 'text-indigo-400' : 'text-slate-600 hover:text-slate-400'}`}
+                          className={`flex-shrink-0 p-3 rounded-xl transition-all ${isActive ? 'bg-indigo-500/20 ring-1 ring-indigo-500/50 text-indigo-400' : 'bg-slate-800 text-slate-600 hover:text-slate-400'}`}
                         >
-                          <div className={`p-3 rounded-xl transition-all ${instruments[inst.id] ? 'bg-indigo-500/20 ring-1 ring-indigo-500/50' : 'bg-slate-800'}`}>
-                            <Icon className="w-5 h-5" />
-                          </div>
-                          <span className="text-[10px] font-semibold tracking-wider uppercase">{inst.label}</span>
+                          <Icon className="w-5 h-5" />
                         </button>
-                      );
-                    })}
+                        <div className="flex-1 space-y-2 transition-opacity" style={{ opacity: isActive ? 1 : 0.4 }}>
+                          <div className="flex justify-between">
+                            <span className="text-[10px] font-semibold tracking-wider uppercase text-slate-300">{inst.label} Volume</span>
+                            <span className="text-[10px] text-indigo-400 font-mono">{volumes[inst.id]}%</span>
+                          </div>
+                          <input 
+                            type="range" min="0" max="100" 
+                            value={volumes[inst.id]} 
+                            onChange={(e) => updateVolume(inst.id, parseInt(e.target.value))}
+                            disabled={!isActive}
+                            className="w-full accent-indigo-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {activeTab === 'beats' && (
+                <div className="space-y-2">
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 p-3 mb-4 rounded-xl text-xs text-indigo-300">
+                    Tap the grid to create your own custom drum beat for the current style.
                   </div>
+                  {renderSequencerRow('Kick', 'kick')}
+                  {renderSequencerRow('Snare', 'snare')}
+                  {renderSequencerRow('Hat', 'hat')}
                 </div>
               )}
 
@@ -1198,6 +1272,28 @@ export default function App() {
                       />
                     </div>
                   </div>
+                </div>
+              )}
+
+              {activeTab === 'chords' && (
+                <div className="space-y-4">
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-xl text-xs text-indigo-300">
+                    Type your chords below, then swipe the Progression card above to <strong>"Custom (Edit Below)"</strong> to hear them!
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Custom Chord Degrees (1-7)</label>
+                    <input 
+                      type="text" 
+                      value={customProgStr} 
+                      onChange={(e) => setCustomProgStr(e.target.value)}
+                      placeholder="e.g. 1 5 6 4"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono tracking-widest"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Use numbers 1 through 7 to represent chords in the key. Separate them with spaces or commas. <br/>
+                    Example: <span className="text-slate-300 font-mono">1 6 4 5</span> or <span className="text-slate-300 font-mono">2, 5, 1, 1, 6, 2, 5, 1</span>
+                  </p>
                 </div>
               )}
             </div>
@@ -1283,5 +1379,3 @@ export default function App() {
     </div>
   );
 }
-
-
